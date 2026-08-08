@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ultrabase.local/schemas/connection-v1.json",
+  "title": "Ultrabase Local Runtime Connection",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "name",
+    "network_scope",
+    "ultrabase_home",
+    "url",
+    "publishable_key",
+    "health_url",
+    "endpoints",
+    "runtime",
+    "client_rules"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "name": { "const": "Ultrabase Local Runtime" },
+    "network_scope": { "const": "loopback_only" },
+    "same_computer_only": { "const": true },
+    "ultrabase_home": { "type": "string", "minLength": 3 },
+    "url": { "const": "http://127.0.0.1:8000" },
+    "server_url_from_docker_container": { "const": "http://host.docker.internal:8000" },
+    "publishable_key": { "type": "string", "pattern": "^sb_publishable_" },
+    "studio_url": { "type": "string" },
+    "health_url": { "const": "http://127.0.0.1:8000/auth/v1/health" },
+    "endpoints": {
+      "type": "object",
+      "required": ["auth", "rest", "graphql", "storage", "realtime", "functions"]
+    },
+    "postgres": {
+      "type": "object",
+      "required": ["session", "transaction", "credentials_included"],
+      "properties": {
+        "credentials_included": { "const": false }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["controller", "ensure_arguments", "status_arguments"]
+    },
+    "client_rules": {
+      "type": "object",
+      "required": ["use_data_api", "require_rls", "administrative_credentials_included", "never_write_database_volume_directly"],
+      "properties": {
+        "use_data_api": { "const": true },
+        "require_rls": { "const": true },
+        "administrative_credentials_included": { "const": false },
+        "never_write_database_volume_directly": { "const": true }
+      }
+    }
+  }
+}

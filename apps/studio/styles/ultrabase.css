@@ -1,0 +1,68 @@
+/* Ultrabase brand overlay. The original Studio layout, spacing and neutral
+   surfaces stay untouched; only brand accents and the local wordmark change. */
+:root,
+[data-theme='light'],
+.light,
+[data-theme='dark'],
+.dark,
+[data-theme='classic-dark'],
+.classic-dark,
+[data-theme='faux-classic-dark'],
+.faux-classic-dark {
+  --primary-hue: 295;
+  --brand-link: 270deg 95% 68%;
+  --brand-default: 271deg 91% 65%;
+  --brand-600: 280deg 87% 72%;
+  --brand-500: 271deg 76% 53%;
+  --brand-400: 270deg 68% 36%;
+  --brand-300: 272deg 58% 22%;
+  --brand-200: 274deg 48% 12%;
+}
+
+[data-theme='light'],
+.light {
+  --brand-link: 270deg 76% 45%;
+  --brand-default: 271deg 81% 56%;
+  --brand-600: 272deg 72% 42%;
+  --brand-500: 270deg 84% 64%;
+  --brand-400: 270deg 95% 75%;
+  --brand-300: 270deg 100% 88%;
+  --brand-200: 270deg 100% 96%;
+}
+
+.ultrabase-wordmark {
+  margin-left: 0.5rem;
+  background: linear-gradient(120deg, #8b5cf6 0%, #c026d3 55%, #f0abfc 100%);
+  background-clip: text;
+  color: transparent;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.bg-brand,
+.bg-primary {
+  background-color: #8b5cf6 !important;
+  background-image: linear-gradient(135deg, #7c3aed 0%, #a855f7 48%, #d946ef 100%) !important;
+}
+
+.hover\:bg-brand-500:hover,
+.hover\:bg-primary\/90:hover {
+  background-color: #7c3aed !important;
+  background-image: linear-gradient(135deg, #6d28d9 0%, #9333ea 48%, #c026d3 100%) !important;
+}
+
+.text-brand,
+.text-brand-link {
+  color: #a855f7 !important;
+}
+
+.border-brand,
+.border-primary {
+  border-color: rgb(168 85 247 / 70%) !important;
+}
+
+::selection {
+  background: rgb(168 85 247 / 35%);
+}

@@ -1,0 +1,38 @@
+ULTRABASE - CONTEUDO DO PACOTE OFFLINE
+
+apps/docs/content/
+  Fonte versionada da documentacao oficial presente no monorepo Supabase.
+
+docker/README.md
+docker/CONFIG.md
+docker/CHANGELOG.md
+docker/versions.md
+docker/.env.example
+  Operacao e configuracao oficial do self-hosted via Docker.
+
+apps/studio/README.md
+  Informacoes do painel Studio.
+
+LICENSE
+  Licenca Apache 2.0 do repositorio.
+
+ULTRABASE.md
+ULTRABASE-DOCUMENTACAO-UNIFICADA.md
+ULTRABASE-STATUS.json
+  Identidade, instalacao e estado validado do fork local.
+
+ultrabase/documentacao/README.md
+ultrabase/documentacao/ULTRABASE-MANUAL-MESTRE.md
+ultrabase/documentacao/REFERENCIAS-OFICIAIS.md
+ultrabase/documentacao/INVENTARIO-DOCUMENTACAO-OFICIAL.csv
+ultrabase/documentacao/CONTEUDO-DO-PACOTE.txt
+  Guia em portugues, referencias, indice e descricao do pacote.
+
+ultrabase/runtime/
+ultrabase/scripts/ultrabase.ps1
+ultrabase/01-INICIAR-ULTRABASE.cmd ate 11-REMOVER-INICIO-AUTOMATICO.cmd
+ultrabase/APPS-CONEXAO.env.example
+  Controlador automatico, contrato, teste, prompt pronto e botoes no-code.
+
+O MANIFESTO-DOCUMENTACAO.json fica ao lado do ZIP, pois registra o hash
+SHA-256 do proprio arquivo ZIP depois que ele e criado.

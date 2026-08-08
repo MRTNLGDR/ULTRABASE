@@ -1,0 +1,26 @@
+# Ultrabase local-only overlay.
+# Keeps every externally published port bound to this computer and provides
+# a host folder for recoverable database backups.
+
+services:
+  studio:
+    image: ultrabase/studio:2026.08-purple-v1
+    build:
+      context: ..
+      dockerfile: docker/studio-ultrabase/Dockerfile
+
+  kong:
+    environment:
+      ULTRABASE_LOCAL_AUTO_ACCESS: "true"
+    ports: !override
+      - "127.0.0.1:${KONG_HTTP_PORT}:8000/tcp"
+      - "127.0.0.1:${KONG_HTTPS_PORT}:8443/tcp"
+
+  supavisor:
+    ports: !override
+      - "127.0.0.1:${POSTGRES_PORT}:5432/tcp"
+      - "127.0.0.1:${POOLER_PROXY_PORT_TRANSACTION}:6543/tcp"
+
+  db:
+    volumes:
+      - ./backups:/backups
