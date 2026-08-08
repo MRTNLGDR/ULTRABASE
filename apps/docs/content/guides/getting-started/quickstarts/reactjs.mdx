@@ -1,0 +1,112 @@
+---
+title: 'Use Supabase with React'
+subtitle: 'Learn how to create a Supabase project, add some sample data to your database, and query the data from a React app.'
+breadcrumb: 'Framework Quickstarts'
+---
+
+<AiPrompt id="reactjs" />
+
+<$Partial path="quickstart_db_setup.mdx" />
+
+## 3. Create a React app
+
+Create a React app using a [Vite](https://vitejs.dev/guide/) template.
+
+```bash
+npm create vite@latest my-app -- --template react
+```
+
+## 4. Install Agent Skills (optional)
+
+Supabase's [Agent Skills](/docs/guides/ai-tools/ai-skills) is a curated set of instructions that give your AI agent procedural knowledge about working with Supabase.
+
+To install, run the following command in the root of your project:
+
+```bash
+npx skills add supabase/agent-skills
+```
+
+## 5. Install the Supabase client library
+
+The fastest way to get started is to use the `supabase-js` client library, which provides a convenient interface for working with Supabase from a React app.
+
+Navigate to the React app and install `supabase-js`.
+
+```bash
+cd my-app && npm install @supabase/supabase-js
+```
+
+## 6. Declare Supabase environment variables
+
+Create a `.env.local` file and populate it with your Supabase URL and publishable key that you can get from the helper below, or [from the project **Connect** panel](/dashboard/project/_?showConnect=true&framework=react&tab=frameworks)
+
+<Button variant="primary" asChild>
+  <a href="/dashboard/project/_?showConnect=true&connectTab=frameworks&framework=react">
+    Open Connect panel
+  </a>
+</Button>
+
+```text name=.env.local
+VITE_SUPABASE_URL=<SUBSTITUTE_SUPABASE_URL>
+VITE_SUPABASE_PUBLISHABLE_KEY=<SUBSTITUTE_SUPABASE_PUBLISHABLE_KEY>
+```
+
+<$Partial path="api_settings.mdx" variables={{ "framework": "react", "tab": "frameworks" }} />
+
+## 7. Query data from the app
+
+Replace the contents of `App.jsx` with a `getInstruments` function that fetches the data and displays the query result on the page using a Supabase client.
+
+```js name=src/App.jsx
+import { createClient } from '@supabase/supabase-js'
+import { useEffect, useState } from 'react'
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+)
+
+function App() {
+  const [instruments, setInstruments] = useState([])
+
+  useEffect(() => {
+    getInstruments()
+  }, [])
+
+  async function getInstruments() {
+    const { data, error } = await supabase.from('instruments').select()
+
+    if (error) {
+      console.error(error)
+      return
+    }
+
+    setInstruments(data)
+  }
+
+  return (
+    <ul>
+      {instruments.map((instrument) => (
+        <li key={instrument.name}>{instrument.name}</li>
+      ))}
+    </ul>
+  )
+}
+
+export default App
+```
+
+## 8. Start the app
+
+Run the development server, go to http://localhost:5173 in a browser, and you should see the list of instruments.
+
+```bash
+npm run dev
+```
+
+## Next steps
+
+- Explore [drop-in UI components](/ui) for your Supabase app
+- Set up [Auth](/docs/guides/auth) for your app
+- [Insert more data](/docs/guides/database/import-data) into your database
+- Upload and serve static files using [Storage](/docs/guides/storage)

@@ -1,0 +1,104 @@
+---
+title: 'Use Supabase with Vue'
+subtitle: 'Learn how to create a Supabase project, add some sample data to your database, and query the data from a Vue app.'
+breadcrumb: 'Framework Quickstarts'
+---
+
+<AiPrompt id="vue" />
+
+<$Partial path="quickstart_db_setup.mdx" />
+
+## 3. Create a Vue app
+
+Create a Vue app using the `npm init` command.
+
+```sh
+npm init vue@latest my-app
+```
+
+## 4. Install Agent Skills (optional)
+
+Supabase's [Agent Skills](/docs/guides/ai-tools/ai-skills) is a curated set of instructions that give your AI agent procedural knowledge about working with Supabase.
+
+To install, run the following command in the root of your project:
+
+```bash
+npx skills add supabase/agent-skills
+```
+
+## 5. Install the Supabase client library
+
+The fastest way to get started is to use the `supabase-js` client library which provides a convenient interface for working with Supabase from a Vue app.
+
+Navigate to the Vue app and install `supabase-js`.
+
+```bash
+cd my-app && npm install @supabase/supabase-js
+```
+
+## 6. Declare Supabase environment variables
+
+Create a `.env.local` file and populate with your Supabase connection variables that you can get from the helper below, or [from the project **Connect** panel](/dashboard/project/_?showConnect=true&framework=vue&tab=frameworks):
+
+<Button variant="primary" asChild>
+  <a href="/dashboard/project/_?showConnect=true&connectTab=frameworks&framework=vue">
+    Open Connect panel
+  </a>
+</Button>
+
+```text name=.env.local
+VITE_SUPABASE_URL=<SUBSTITUTE_SUPABASE_URL>
+VITE_SUPABASE_PUBLISHABLE_KEY=<SUBSTITUTE_SUPABASE_PUBLISHABLE_KEY>
+```
+
+<$Partial path="api_settings.mdx" variables={{ "framework": "vue", "tab": "frameworks" }} />
+
+## 7. Create the Supabase client
+
+Create a `/src/lib` directory in your Vue app, create a file called `supabaseClient.js` and add the following code to initialize the Supabase client:
+
+```js name=src/lib/supabaseClient.js
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+
+export const supabase = createClient(supabaseUrl, supabasePublishableKey)
+```
+
+## 8. Query data from the app
+
+Replace the existing content in your `App.vue` file with the following code.
+
+```vue name=src/App.vue
+<script setup>
+import { onMounted, ref } from 'vue'
+
+import { supabase } from './lib/supabaseClient'
+
+const instruments = ref([])
+
+async function getInstruments() {
+  const { data } = await supabase.from('instruments').select()
+  instruments.value = data
+}
+
+onMounted(() => {
+  getInstruments()
+})
+</script>
+
+<template>
+  <ul>
+    <li v-for="instrument in instruments" :key="instrument.id">{{ instrument.name }}</li>
+  </ul>
+</template>
+```
+
+## 9. Start the app
+
+Start the app and go to http://localhost:5173 in a browser and you should see the list of instruments.
+
+```bash
+npm run dev
+```

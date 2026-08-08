@@ -1,0 +1,143 @@
+---
+title: 'Use Supabase with TanStack Start'
+subtitle: 'Learn how to create a Supabase project, add some sample data to your database, and query the data from a TanStack Start app.'
+breadcrumb: 'Framework Quickstarts'
+---
+
+<AiPrompt id="tanstack" />
+
+<$Partial path="quickstart_db_setup.mdx" />
+
+## 3. Create a TanStack Start app
+
+Create a TanStack Start app using the official CLI.
+
+```bash
+npx @tanstack/cli@latest create my-app
+```
+
+## 4. Install Agent Skills (optional)
+
+Supabase's [Agent Skills](/docs/guides/ai-tools/ai-skills) is a curated set of instructions that give your AI agent procedural knowledge about working with Supabase.
+
+To install, run the following command in the root of your project:
+
+```bash
+npx skills add supabase/agent-skills
+```
+
+## 5. Install the Supabase client libraries
+
+Navigate to the TanStack Start app and install `supabase-js` and `@supabase/ssr`, the helper package that manages cookie-based sessions for server-side rendering.
+
+```bash
+cd my-app && npm install @supabase/supabase-js @supabase/ssr
+```
+
+## 6. Declare Supabase environment variables
+
+Create a `.env.local` file in the root of your project and populate it with your Supabase connection variables. Get the values from the helper below, or [from the project **Connect** panel](/dashboard/project/_?showConnect=true&connectTab=frameworks&framework=tanstack).
+
+<Button variant="primary" asChild>
+  <a href="/dashboard/project/_?showConnect=true&connectTab=frameworks&framework=tanstack">
+    Open Connect panel
+  </a>
+</Button>
+
+```text name=.env.local
+VITE_SUPABASE_URL=<SUBSTITUTE_SUPABASE_URL>
+VITE_SUPABASE_PUBLISHABLE_KEY=<SUBSTITUTE_SUPABASE_PUBLISHABLE_KEY>
+```
+
+<$Partial path="api_settings.mdx" variables={{ "framework": "tanstack", "tab": "frameworks" }} />
+
+## 7. Create Supabase client utilities
+
+TanStack Start needs two Supabase clients: a browser client for components that run in the browser, and a server client for loaders and server functions. Create a `src/lib/supabase` folder with a file for each client.
+
+```ts name=src/lib/supabase/client.ts
+/// <reference types="vite/types/importMeta.d.ts" />
+import { createBrowserClient } from '@supabase/ssr'
+
+export function createClient() {
+  return createBrowserClient(
+    import.meta.env.VITE_SUPABASE_URL!,
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY!
+  )
+}
+```
+
+```ts name=src/lib/supabase/server.ts
+import { createServerClient } from '@supabase/ssr'
+import { getCookies, setCookie, setResponseHeader } from '@tanstack/react-start/server'
+
+export function createClient() {
+  return createServerClient(
+    process.env.VITE_SUPABASE_URL!,
+    process.env.VITE_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return Object.entries(getCookies()).map(([name, value]) => ({ name, value }))
+        },
+        setAll(cookies, headers) {
+          cookies.forEach(({ name, value, options }) => {
+            setCookie(name, value, options)
+          })
+
+          Object.entries(headers).forEach(([name, value]) => {
+            setResponseHeader(name, value)
+          })
+        },
+      },
+    }
+  )
+}
+```
+
+## 8. Query Supabase data from TanStack Start
+
+Replace the contents of `src/routes/index.tsx` with the following to add a loader that queries the `instruments` table through the server client. The loader runs on the server, so the data is part of the initial server-rendered response.
+
+```tsx name=src/routes/index.tsx
+import { createFileRoute } from '@tanstack/react-router'
+
+import { createClient } from '@/lib/supabase/server'
+
+export const Route = createFileRoute('/')({
+  loader: async () => {
+    const supabase = createClient()
+    const { data: instruments } = await supabase.from('instruments').select()
+    return { instruments }
+  },
+  component: Home,
+})
+
+function Home() {
+  const { instruments } = Route.useLoaderData()
+
+  return (
+    <ul>
+      {instruments?.map((instrument) => (
+        <li key={instrument.name}>{instrument.name}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+## 9. Start the app
+
+Run the development server, go to http://localhost:3000 in a browser and you should see the list of instruments.
+
+```bash
+npm run dev
+```
+
+## Next steps
+
+- Learn how to [protect routes and check sessions](/docs/guides/auth/server-side/creating-a-client?queryGroups=framework&framework=tanstack) with the server client
+- Set up a complete [login and sign-up flow](/ui/docs/tanstack/password-based-auth) from the Supabase UI Library
+- Explore [drop-in UI components](/ui) for your Supabase app
+- [Insert more data](/docs/guides/database/import-data) into your database
+- Upload and serve static files using [Storage](/docs/guides/storage)

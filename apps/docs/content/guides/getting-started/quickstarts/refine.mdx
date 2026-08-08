@@ -1,0 +1,167 @@
+---
+title: 'Use Supabase with Refine'
+subtitle: 'Learn how to create a Supabase project, add some sample data to your database, and query the data from a Refine app.'
+breadcrumb: 'Framework Quickstarts'
+---
+
+<AiPrompt id="refine" />
+
+<$Partial path="quickstart_db_setup.mdx" />
+
+## 3. Create a Refine app
+
+Create a [Refine](https://github.com/refinedev/refine) app using the [create refine-app](https://refine.dev/docs/getting-started/quickstart/).
+
+The `refine-supabase` preset adds `@refinedev/supabase` supplementary package that supports Supabase in a Refine app. `@refinedev/supabase` out-of-the-box includes the Supabase dependency: [supabase-js](https://github.com/supabase/supabase-js).
+
+```bash
+npm create refine-app@latest -- --preset refine-supabase my-app
+```
+
+![Refine welcome page](/docs/img/refine-qs-welcome-page.png)
+
+## 4. Install Agent Skills (optional)
+
+Supabase's [Agent Skills](/docs/guides/ai-tools/ai-skills) is a curated set of instructions that give your AI agent procedural knowledge about working with Supabase.
+
+To install, run the following command in the root of your project:
+
+```bash
+npx skills add supabase/agent-skills
+```
+
+## 5. Update `supabaseClient` with environment variables
+
+Update the `supabaseClient` with the `SUPABASE_URL` and `SUPABASE_KEY` of your Supabase API, which you can get from the helper below, or [from the project **Connect** panel](/dashboard/project/_?showConnect=true&framework=refine&tab=frameworks). The `supabaseClient` is used in auth provider and data provider methods that allow the Refine app to connect to your Supabase backend.
+
+<Button variant="primary" asChild>
+  <a href="/dashboard/project/_?showConnect=true&connectTab=frameworks&framework=refine">
+    Open Connect panel
+  </a>
+</Button>
+
+```ts name=src/utility/supabaseClient.ts
+import { createClient } from '@refinedev/supabase'
+
+const SUPABASE_URL = '<your-supabase-url>'
+const SUPABASE_KEY = '<your-supabase-publishable-key>'
+
+export const supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  db: {
+    schema: 'public',
+  },
+  auth: {
+    persistSession: true,
+  },
+})
+```
+
+<$Partial path="api_settings.mdx" variables={{ "framework": "refine", "tab": "frameworks" }} />
+
+## 6. Add instruments resource and pages
+
+Use the following code to automatically add resources and generate code for the pages to show the `instruments` data using Refine Inferencer.
+
+This defines pages for `list`, `create`, `show` and `edit` actions inside the `src/pages/instruments/` directory with a `<HeadlessInferencer />` component.
+
+The `<HeadlessInferencer />` component depends on `@refinedev/react-table` and `@refinedev/react-hook-form` packages. To avoid errors, you should install them as dependencies with `npm install @refinedev/react-table @refinedev/react-hook-form`.
+
+<Admonition type="note">
+
+The `<HeadlessInferencer />` is a Refine Inferencer component that automatically generates necessary code for the `list`, `create`, `show` and `edit` pages.
+
+Read more on [how the Inferencer works is in the Refine docs](https://refine.dev/docs/packages/documentation/inferencer/).
+
+</Admonition>
+
+```bash
+npm run refine create-resource instruments
+```
+
+## 7. Add routes for instruments pages
+
+Add routes for the `list`, `create`, `show`, and `edit` pages.
+
+<Admonition type="note">
+
+Remove the `index` route for the Welcome page presented with the `<Welcome />` component.
+
+</Admonition>
+
+```tsx name=src/App.tsx
+import { Refine } from '@refinedev/core'
+import { RefineKbar, RefineKbarProvider } from '@refinedev/kbar'
+import routerProvider, {
+  DocumentTitleHandler,
+  NavigateToResource,
+  UnsavedChangesNotifier,
+} from '@refinedev/react-router'
+import { dataProvider, liveProvider } from '@refinedev/supabase'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
+
+import './App.css'
+
+import authProvider from './authProvider'
+import {
+  InstrumentsCreate,
+  InstrumentsEdit,
+  InstrumentsList,
+  InstrumentsShow,
+} from './pages/instruments'
+import { supabaseClient } from './utility'
+
+function App() {
+  return (
+    <BrowserRouter>
+      <RefineKbarProvider>
+        <Refine
+          dataProvider={dataProvider(supabaseClient)}
+          liveProvider={liveProvider(supabaseClient)}
+          authProvider={authProvider}
+          routerProvider={routerProvider}
+          options={{
+            syncWithLocation: true,
+            warnWhenUnsavedChanges: true,
+          }}
+          resources={[
+            {
+              name: 'instruments',
+              list: '/instruments',
+              create: '/instruments/create',
+              edit: '/instruments/edit/:id',
+              show: '/instruments/show/:id',
+            },
+          ]}
+        >
+          <Routes>
+            <Route index element={<NavigateToResource resource="instruments" />} />
+            <Route path="/instruments">
+              <Route index element={<InstrumentsList />} />
+              <Route path="create" element={<InstrumentsCreate />} />
+              <Route path="edit/:id" element={<InstrumentsEdit />} />
+              <Route path="show/:id" element={<InstrumentsShow />} />
+            </Route>
+          </Routes>
+          <RefineKbar />
+          <UnsavedChangesNotifier />
+          <DocumentTitleHandler />
+        </Refine>
+      </RefineKbarProvider>
+    </BrowserRouter>
+  )
+}
+
+export default App
+```
+
+## 8. View instruments pages
+
+Start the app with the following command:
+
+```bash
+npm run dev
+```
+
+Open http://localhost:5173/instruments in a browser, and you should be able to see the instruments pages along the `/instruments` routes. You can edit and add new instruments using the Inferencer generated UI.
+
+The Inferencer auto-generated code gives you a good starting point on which to keep building your `list`, `create`, `show` and `edit` pages. You can get these by clicking the `Show the auto-generated code` buttons in their respective pages.

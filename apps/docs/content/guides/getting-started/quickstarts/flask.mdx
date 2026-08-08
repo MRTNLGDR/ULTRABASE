@@ -1,0 +1,109 @@
+---
+title: 'Use Supabase with Python'
+subtitle: 'Learn how to create a Supabase project, add some sample data to your database, and query the data from a Python app.'
+breadcrumb: 'Framework Quickstarts'
+---
+
+<AiPrompt id="flask" />
+
+<$Partial path="quickstart_db_setup.mdx" />
+
+## 3. Create a Python app with Flask
+
+Create a new directory for your Python app and set up a virtual environment.
+
+```bash
+mkdir my-app && cd my-app
+python3 -m venv venv
+source venv/bin/activate
+```
+
+## 4. Install Agent Skills (optional)
+
+Supabase's [Agent Skills](/docs/guides/ai-tools/ai-skills) is a curated set of instructions that give your AI agent procedural knowledge about working with Supabase.
+
+To install, run the following command in the root of your project:
+
+```bash
+npx skills add supabase/agent-skills
+```
+
+## 5. Install Flask and the Supabase client library
+
+The fastest way to get started is to use Flask for the web framework and the `supabase-py` client library which provides a convenient interface for working with Supabase from a Python app.
+
+Install both packages using pip.
+
+```bash
+pip install flask supabase
+```
+
+## 6. Create environment variables file
+
+Create a `.env` file in your project root and populate it with your Supabase connection variables that you can get from the helper below, or [from the project **Connect** panel](/dashboard/project/_?showConnect=true):
+
+<Button variant="primary" asChild>
+  <a href="/dashboard/project/_?showConnect=true">Open Connect panel</a>
+</Button>
+
+```text name=.env
+SUPABASE_URL=<SUBSTITUTE_SUPABASE_URL>
+SUPABASE_PUBLISHABLE_KEY=<SUBSTITUTE_SUPABASE_PUBLISHABLE_KEY>
+```
+
+<$Partial path="api_settings.mdx" variables={{ "framework": "", "tab": "" }} />
+
+## 7. Query data from the app
+
+Install the `python-dotenv` package to load environment variables:
+
+```bash
+pip install python-dotenv
+```
+
+Create an `app.py` file and add a route that fetches data from your `instruments` table using the Supabase client.
+
+```python name=app.py
+import os
+from flask import Flask
+from supabase import create_client, Client
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = Flask(__name__)
+
+supabase: Client = create_client(
+    os.environ.get("SUPABASE_URL"),
+    os.environ.get("SUPABASE_PUBLISHABLE_KEY")
+)
+
+@app.route('/')
+def index():
+    response = supabase.table('instruments').select("*").execute()
+    instruments = response.data
+
+    html = '<h1>Instruments</h1><ul>'
+    for instrument in instruments:
+        html += f'<li>{instrument["name"]}</li>'
+    html += '</ul>'
+
+    return html
+
+if __name__ == '__main__':
+    app.run(debug=True)
+```
+
+## 8. Start the app
+
+Run the Flask development server, and go to http://localhost:5000 in your browser, you should see the list of instruments.
+
+```bash
+python app.py
+```
+
+## Next steps
+
+- Set up [Auth](/docs/guides/auth) for your app
+- [Insert more data](/docs/guides/database/import-data) into your database
+- Upload and serve static files using [Storage](/docs/guides/storage)

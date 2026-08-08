@@ -1,0 +1,83 @@
+---
+title: 'Use Supabase with Ruby on Rails'
+subtitle: 'Learn how to create a Rails project and connect it to your Supabase Postgres database.'
+breadcrumb: 'Framework Quickstarts'
+---
+
+<AiPrompt id="ruby-on-rails" />
+
+## 1. Create a Rails project
+
+With your Ruby and Rails versions up to date, run `rails new` on your terminal to scaffold a new project.
+
+Use the `-d=postgresql` flag to set it up for Postgres.
+
+Check the [Rails docs](https://guides.rubyonrails.org/getting_started.html) for more details.
+
+```bash
+rails new blog -d=postgresql
+```
+
+Supabase's [Agent Skills](/docs/guides/ai-tools/ai-skills) is a curated set of instructions that give your AI agent procedural knowledge about working with Supabase.
+
+To install, run the following command in the root of your project:
+
+```bash
+npx skills add supabase/agent-skills
+```
+
+## 3. Install MCP server (optional)
+
+The Supabase MCP server connects AI assistants to Supabase, allowing you to interact with your projects on your behalf. Find out more on how to add it to your client in [the MCP docs](/docs/guides/ai-tools/mcp).
+
+## 4. Set up the Postgres connection details
+
+Go to [database.new](https://database.new) and create a new Supabase project. Save your database password securely.
+
+When your project is up and running, navigate to your project dashboard and click on [Connect](/dashboard/project/_?showConnect=true&method=session).
+
+Look for the Session Pooler connection string and copy the string. You will need to replace the Password with your saved database password. You can reset your database password in your [Database Settings](/dashboard/project/_/database/settings) if you do not have it.
+
+<Admonition type="note">
+
+If you're in an [IPv6 environment](https://github.com/orgs/supabase/discussions/27034) or have the IPv4 Add-On, you can use the direct connection string instead of Supavisor in Session mode.
+
+</Admonition>
+
+```bash name=.env
+export DATABASE_URL=postgres://postgres.xxxx:password@xxxx.pooler.supabase.com:5432/postgres
+```
+
+## 5. Create and run a database migration
+
+Rails includes Active Record as the ORM as well as database migration tooling which generates the SQL migration files for you.
+
+Create an example `Article` model and generate the migration files.
+
+```bash
+bin/rails generate model Article title:string body:text
+bin/rails db:migrate
+```
+
+## 6. Use the model to interact with the database
+
+You can use the included Rails console to interact with the database. For example, you can create new entries or list all entries in a Model's table.
+
+```bash
+bin/rails console
+```
+
+```rb name=irb
+article = Article.new(title: "Hello Rails", body: "I am on Rails!")
+article.save # Saves the entry to the database
+
+Article.all
+```
+
+## 7. Start the app
+
+Run the development server. Go to http://127.0.0.1:3000 in a browser to see your application running.
+
+```bash
+bin/rails server
+```

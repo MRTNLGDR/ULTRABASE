@@ -1,0 +1,64 @@
+---
+title: 'Use Supabase with Hono'
+subtitle: 'Learn how to create a Supabase project, add some sample data to your database, secure it with auth, and query the data from a Hono app.'
+breadcrumb: 'Framework Quickstarts'
+---
+
+<AiPrompt id="hono" />
+
+<$Partial path="quickstart_db_setup.mdx" />
+
+## 3. Create a Hono app
+
+Bootstrap the Hono example app from the Supabase Samples using the CLI.
+
+```bash
+npx supabase@latest bootstrap hono
+```
+
+## 4. Install Agent Skills (optional)
+
+Supabase's [Agent Skills](/docs/guides/ai-tools/ai-skills) is a curated set of instructions that give your AI agent procedural knowledge about working with Supabase.
+
+To install, run the following command in the root of your project:
+
+```bash
+npx skills add supabase/agent-skills
+```
+
+## 5. Install the Supabase client library
+
+The `package.json` file in the project includes the necessary dependencies, including `@supabase/supabase-js` and `@supabase/ssr` to help with server-side auth.
+
+```bash
+npm install
+```
+
+## 6. Set up the required environment variables
+
+Copy the `.env.example` file to `.env` and update the values with your Supabase project URL and publishable key, which you can get from the helper below, or [from the project **Connect** panel](/dashboard/project/_?showConnect=true&tab=frameworks).
+
+Lastly, [enable anonymous sign-ins](/dashboard/project/_/auth/providers) in the Auth settings.
+
+```bash
+cp .env.example .env
+```
+
+{/* TODO: Not ideal for frameworks that have no entry in Connect */}
+<$Partial path="api_settings.mdx" variables={{ "framework": "", "tab": "frameworks" }} />
+
+## 7. Start the app
+
+Start the app, go to http://localhost:5173.
+
+Learn how [server side auth](/docs/guides/auth/server-side/creating-a-client?queryGroups=framework&framework=hono) works with Hono.
+
+```bash
+npm run dev
+```
+
+## Next steps
+
+- Learn how [server side auth](/docs/guides/auth/server-side/creating-a-client?queryGroups=framework&framework=hono) works with Hono.
+- [Insert more data](/docs/guides/database/import-data) into your database
+- Upload and serve static files using [Storage](/docs/guides/storage)
