@@ -55,7 +55,12 @@ jobs:
         run: |
           set -euo pipefail
           git check-ignore --no-index -q docker/.env
-          forbidden="$(git ls-files | grep -E '^(docker/\.env|docker/backups/|docker/volumes/db/data/|docker/volumes/storage/)' || true)"
+          forbidden="$(git ls-files | awk '
+            $0 == "docker/.env" { print; next }
+            $0 ~ /^docker\/backups\// && $0 !~ /\/[.]gitkeep$/ { print; next }
+            $0 ~ /^docker\/volumes\/db\/data\// && $0 !~ /\/[.]gitkeep$/ { print; next }
+            $0 ~ /^docker\/volumes\/storage\// && $0 !~ /\/([.]gitkeep|[.]emptyFolderPlaceholder)$/ { print; next }
+          ')"
           if [[ -n "$forbidden" ]]; then
             echo "Private Ultrabase state is tracked:" >&2
             echo "$forbidden" >&2
