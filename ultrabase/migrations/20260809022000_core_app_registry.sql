@@ -24,6 +24,7 @@ create table if not exists public.core_applications (
   source_repository text,
   manifest_sha256 text not null,
   migrations_path text not null,
+  allow_anonymous boolean not null default false,
   buckets jsonb not null default '[]'::jsonb,
   edge_functions jsonb not null default '[]'::jsonb,
   shared_dependencies jsonb not null default '[]'::jsonb,
