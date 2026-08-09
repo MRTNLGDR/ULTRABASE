@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('validate', 'plan', 'apply', 'verify')]
@@ -43,7 +43,7 @@ function Resolve-ExistingDirectory([string]$Path) {
     if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
         throw "Diretório não encontrado: $resolved"
     }
-    return $resolved.TrimEnd('\', '/')
+    return $resolved.TrimEnd('\\', '/')
 }
 
 function Resolve-SafeChildPath([string]$Base, [string]$Relative) {
@@ -51,7 +51,7 @@ function Resolve-SafeChildPath([string]$Base, [string]$Relative) {
         throw "migrations_path deve ser relativo ao app: $Relative"
     }
     $candidate = [System.IO.Path]::GetFullPath((Join-Path $Base $Relative))
-    $prefix = $Base.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $prefix = $Base.TrimEnd('\\', '/') + [System.IO.Path]::DirectorySeparatorChar
     if (-not $candidate.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "migrations_path sai da raiz do app: $Relative"
     }
@@ -184,7 +184,7 @@ function Assert-SqlSafe([string]$Sql, [string]$FileName, [string]$Prefix) {
         throw "$FileName parece conter segredo/credencial. Migrations nunca podem transportar segredos."
     }
     if ($Sql -match '(?is)\b(?:create|alter|drop)\s+(?:role|user|database|schema|extension)\b') {
-        throw "$FileName tenta administrar role/database/schema/extension. Dependências compartilhadas pertencem à governança core do Ultrabase."
+        throw "$FileName tenta administrar role/user/database/schema/extension. Dependências compartilhadas pertencem à governança core do Ultrabase."
     }
 
     $internalMutation = '(?is)\b(?:alter\s+table|drop\s+(?:table|function|procedure|view|type)|truncate\s+(?:table\s+)?|insert\s+into|update|delete\s+from|create\s+table)\s+(?:if\s+(?:not\s+)?exists\s+)?(?:auth|storage|realtime|extensions|supabase_functions|vault|graphql)\.'
@@ -193,8 +193,8 @@ function Assert-SqlSafe([string]$Sql, [string]$FileName, [string]$Prefix) {
     }
 
     $patterns = @(
-        '(?is)\bcreate\s+(?:or\s+replace\s+)?(?:table|view|materialized\s+view|function|procedure|sequence)\s+(?:if\s+not\s+exists\s+)?public\.([a-zA-Z_][a-zA-Z0-9_]*)',
-        '(?is)\b(?:alter\s+table|drop\s+(?:table|view|function|procedure|sequence)|truncate\s+(?:table\s+)?|insert\s+into|update|delete\s+from)\s+(?:if\s+exists\s+)?public\.([a-zA-Z_][a-zA-Z0-9_]*)',
+        '(?is)\bcreate\s+(?:or\s+replace\s+)?(?:table|view|materialized\s+view|function|procedure|sequence)\s+(?:if\s+not\s+exists\s+)?(?:public\\.([a-zA-Z_][a-zA-Z0-9_]*))',
+        '(?is)\b(?:alter\s+table|drop\s+(?:table|view|function|procedure|sequence)|truncate\s+(?:table\s+)?|insert\s+into|update|delete\s+from)\s+(?:if\s+exists\s+)?(?:public\\.([a-zA-Z_][a-zA-Z0-9_]*))',
         '(?is)\b(?:create|alter|drop)\s+policy\b.*?\bon\s+public\.([a-zA-Z_][a-zA-Z0-9_]*)',
         '(?is)\bcreate\s+(?:constraint\s+)?trigger\b.*?\bon\s+public\.([a-zA-Z_][a-zA-Z0-9_]*)',
         '(?is)\balter\s+publication\s+supabase_realtime\s+add\s+table\s+public\.([a-zA-Z_][a-zA-Z0-9_]*)',
@@ -212,7 +212,7 @@ function Assert-SqlSafe([string]$Sql, [string]$FileName, [string]$Prefix) {
 }
 
 function Get-MigrationDescriptor([System.IO.FileInfo]$File, [string]$Slug, [string]$Prefix) {
-    $namePattern = "^[0-9]{14}_$([regex]::Escape($Slug))_.+\.sql$"
+    $namePattern = "^[0-9]{14}_$([regex]::Escape($Slug))_.+\\.sql$"
     if ($File.Name -notmatch $namePattern) {
         throw "Nome de migration inválido: $($File.Name). Use <timestamp>_${Slug}_<mudanca>.sql"
     }
@@ -221,7 +221,7 @@ function Get-MigrationDescriptor([System.IO.FileInfo]$File, [string]$Slug, [stri
     Assert-SqlSafe -Sql $sql -FileName $File.Name -Prefix $Prefix
 
     $destructive = ($sql -match '(?is)\b(?:drop\s+(?:table|view|function|procedure|type)|truncate\s+(?:table\s+)?|alter\s+table\b[^;]*\bdrop\s+(?:column|constraint)|delete\s+from\s+public\.)')
-    $rollbackPath = $File.FullName -replace '\.sql$', '.rollback.sql'
+    $rollbackPath = $File.FullName -replace '\\.sql$', '.rollback.sql'
     $rollback = if (Test-Path -LiteralPath $rollbackPath -PathType Leaf) { $rollbackPath } else { $null }
 
     if ($destructive -and -not $rollback) {
@@ -334,7 +334,7 @@ function Get-GitCommit([string]$Root) {
 }
 
 function Get-AppRegistration([string]$Slug) {
-    $rows = Invoke-DbQuery "select table_prefix || E'\t' || manifest_sha256 from public.core_applications where app_slug=$(ConvertTo-SqlLiteral $Slug);"
+    $rows = Invoke-DbQuery "select table_prefix || E'\\t' || manifest_sha256 from public.core_applications where app_slug=$(ConvertTo-SqlLiteral $Slug);"
     if ($rows.Count -eq 0) { return $null }
     $parts = $rows[0] -split "`t", 2
     return [pscustomobject]@{ table_prefix = $parts[0]; manifest_sha256 = if ($parts.Count -gt 1) { $parts[1] } else { '' } }
@@ -403,7 +403,7 @@ where public.core_applications.table_prefix=excluded.table_prefix;
 }
 
 function Get-AppliedMigrations([string]$Slug) {
-    $rows = Invoke-DbQuery "select migration_name || E'\t' || migration_sha256 || E'\t' || coalesce(rollback_sha256,'') from public.core_app_migrations where app_slug=$(ConvertTo-SqlLiteral $Slug) order by migration_name;"
+    $rows = Invoke-DbQuery "select migration_name || E'\\t' || migration_sha256 || E'\\t' || coalesce(rollback_sha256,'') from public.core_app_migrations where app_slug=$(ConvertTo-SqlLiteral $Slug) order by migration_name;"
     $map = @{}
     foreach ($row in $rows) {
         if ([string]::IsNullOrWhiteSpace($row)) { continue }
@@ -476,7 +476,7 @@ order by table_name;
 
     $missingBuckets = @()
     foreach ($bucket in $Contract.buckets) {
-        $rows = Invoke-DbQuery "select count(*) from storage.buckets where id=$(ConvertTo-SqlLiteral ([string]$bucket));"
+        $rows = Invoke-DbQuery "select count(*) from storage.buckets where id=$(ConvertTo-SqlLiteral $bucket);"
         if ([int]$rows[0] -ne 1) { $missingBuckets += [string]$bucket }
     }
     if ($missingBuckets.Count -gt 0) {
@@ -485,7 +485,7 @@ order by table_name;
 
     $missingFunctions = @()
     foreach ($functionName in $Contract.edge_functions) {
-        $indexPath = Join-Path $RepoRoot ("docker\volumes\functions\$functionName\index.ts")
+        $indexPath = Join-Path $RepoRoot ("docker\\volumes\\functions\\$functionName\\index.ts")
         if (-not (Test-Path -LiteralPath $indexPath -PathType Leaf)) { $missingFunctions += [string]$functionName }
     }
     if ($missingFunctions.Count -gt 0) {
