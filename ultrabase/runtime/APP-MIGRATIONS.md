@@ -162,7 +162,7 @@ Isso é intencional: marcar migrations como aplicadas sem provar equivalência s
 
 O workflow `.github/workflows/ultrabase-app-governance.yml` prova duas camadas:
 
-- Windows/PowerShell: parser + casos positivos e negativos do gate estáático;
+- Windows/PowerShell: parser + casos positivos e negativos do gate estático;
 - PostgreSQL 17: replay idempotente da migration core, RLS, grants, constraints e imutabilidade dos ledgers.
 
 Nenhuma mudança deste subsistema deve ser considerada concluída se esse workflow estiver vermelho.

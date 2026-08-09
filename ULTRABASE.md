@@ -4,13 +4,21 @@ Fork local do Supabase, preparado para uso gratuito, self-hosted e orientado ao 
 
 ## Comece aqui
 
-O **Ultrabase Local Runtime já está instalado no início do Windows** para o usuário atual. Ele inicia o Docker Desktop quando necessário, recupera a stack e mantém uma única conexão para todos os apps.
+O ponto de entrada oficial do projeto é **`RUN.bat` na raiz**. Para uso normal, clique somente nele. O motor compartilhado configurado na máquina cuida de atualização do Git, instalação, recuperação/subida do runtime e abertura do navegador.
 
-1. Normalmente, apenas abra `ultrabase/02-ABRIR-PAINEL-NO-CODE.cmd`.
-2. Se o runtime tiver sido pausado, abra `ultrabase/01-INICIAR-ULTRABASE.cmd`.
-3. Para reinstalar ou reparar o início automático, abra `ultrabase/09-INSTALAR-RUNTIME-AUTOMATICO.cmd`.
+Opções suportadas pelo ponto de entrada único:
 
-O painel local abre automaticamente, sem pedir login, porque aceita conexões somente deste computador. Use `03-MOSTRAR-CREDENCIAIS.cmd` para consultar o acesso de recuperação e a chave publicável dos aplicativos.
+```text
+RUN.bat
+RUN.bat /sem-navegador
+RUN.bat /sem-pull
+RUN.bat /reinstalar
+RUN.bat /parar
+```
+
+Os `.cmd` e scripts históricos dentro de `ultrabase/` continuam versionados porque fazem parte da implementação e da recuperação do runtime, mas **não são mais o caminho normal de inicialização para o usuário**. A regra operacional vigente está em [`AGENTS.md`](./AGENTS.md).
+
+O **Ultrabase Local Runtime** mantém uma única stack local compartilhada por todos os apps. O endpoint canônico do cliente é `http://127.0.0.1:8000`.
 
 A documentação da instalação está em [`ULTRABASE-DOCUMENTACAO-UNIFICADA.md`](./ULTRABASE-DOCUMENTACAO-UNIFICADA.md).
 
@@ -18,8 +26,8 @@ Para conectar aplicativos, backends, RPA ou bancos internos, comece pelo [`Manua
 
 Prompt pronto para qualquer aplicativo: [`PROMPT-PARA-CONECTAR-QUALQUER-APP.md`](./ultrabase/runtime/PROMPT-PARA-CONECTAR-QUALQUER-APP.md).
 
-Organização de vários apps e estado real do pacote: [`ARQUITETURA-MULTIAPP-E-EMPACOTAMENTO.md`](./ultrabase/runtime/ARQUITETURA-MULTIAPP-E-EMPACOTAMENTO.md). A decisão oficial é um Ultrabase físico com namespace e RLS por app. O runtime já está instalado e automático nesta máquina; o ZIP transportável não inclui banco vivo, segredos ou imagens Docker e não é um executável independente.
+Organização de vários apps e estado real do pacote: [`ARQUITETURA-MULTIAPP-E-EMPACOTAMENTO.md`](./ultrabase/runtime/ARQUITETURA-MULTIAPP-E-EMPACOTAMENTO.md). A decisão oficial é um Ultrabase físico com namespace e RLS por app. O ZIP transportável não inclui banco vivo, segredos ou imagens Docker e não é um executável independente.
 
-Aplicação segura e auditável de migrations de qualquer app: [`APP-MIGRATIONS.md`](./ultrabase/runtime/APP-MIGRATIONS.md). O gate valida namespace, bloqueia alterações em domínios alheios, exige backup, registra checksums imutáveis e mantém migration + ledger na mesma transação.
+Aplicação segura e auditável de migrations de qualquer app: [`APP-MIGRATIONS.md`](./ultrabase/runtime/APP-MIGRATIONS.md). O controlador interno valida namespace, bloqueia alterações em domínios alheios, exige backup, registra checksums imutáveis e mantém migration + ledger na mesma transação. Ele é ferramenta administrativa/automática, não um segundo inicializador de usuário.
 
 Estado verificável: [`ULTRABASE-STATUS.json`](./ULTRABASE-STATUS.json).
