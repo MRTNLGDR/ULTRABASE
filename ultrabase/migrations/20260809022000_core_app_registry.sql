@@ -43,15 +43,21 @@ create table if not exists public.core_app_migrations (
   migration_sha256 text not null,
   destructive boolean not null default false,
   rollback_name text,
+  rollback_sha256 text,
   applied_at timestamptz not null default now(),
   applied_by text not null default current_user,
   ultrabase_commit text,
+  app_commit text,
   metadata jsonb not null default '{}'::jsonb,
   primary key (app_slug, migration_name),
   constraint core_app_migrations_name_format
     check (migration_name ~ '^[0-9]{14}_[a-z][a-z0-9_]{1,23}_.+\.sql$'),
   constraint core_app_migrations_sha_format
-    check (migration_sha256 ~ '^[0-9a-f]{64}$')
+    check (migration_sha256 ~ '^[0-9a-f]{64}$'),
+  constraint core_app_migrations_rollback_sha_format
+    check (rollback_sha256 is null or rollback_sha256 ~ '^[0-9a-f]{64}$'),
+  constraint core_app_migrations_destructive_rollback
+    check (not destructive or (rollback_name is not null and rollback_sha256 is not null))
 );
 
 create table if not exists public.core_app_migration_runs (
@@ -85,10 +91,30 @@ begin
 end;
 $$;
 
+create or replace function public.core_reject_ledger_mutation()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+begin
+  raise exception 'Ultrabase migration ledgers are append-only';
+end;
+$$;
+
 drop trigger if exists core_applications_touch_updated_at on public.core_applications;
 create trigger core_applications_touch_updated_at
 before update on public.core_applications
 for each row execute function public.core_touch_updated_at();
+
+drop trigger if exists core_platform_migrations_immutable on public.core_platform_migrations;
+create trigger core_platform_migrations_immutable
+before update or delete on public.core_platform_migrations
+for each row execute function public.core_reject_ledger_mutation();
+
+drop trigger if exists core_app_migrations_immutable on public.core_app_migrations;
+create trigger core_app_migrations_immutable
+before update or delete on public.core_app_migrations
+for each row execute function public.core_reject_ledger_mutation();
 
 -- Platform registry is administrative state. It is not part of the client Data API.
 alter table public.core_platform_migrations enable row level security;
@@ -101,13 +127,14 @@ revoke all on table public.core_applications from anon, authenticated;
 revoke all on table public.core_app_migrations from anon, authenticated;
 revoke all on table public.core_app_migration_runs from anon, authenticated;
 revoke all on function public.core_touch_updated_at() from public, anon, authenticated;
+revoke all on function public.core_reject_ledger_mutation() from public, anon, authenticated;
 
 comment on table public.core_platform_migrations is
-  'Immutable checksum ledger for Ultrabase-owned platform migrations.';
+  'Append-only checksum ledger for Ultrabase-owned platform migrations.';
 comment on table public.core_applications is
   'Ultrabase-governed registry of logical applications sharing this physical installation.';
 comment on table public.core_app_migrations is
-  'Immutable checksum ledger of application migrations applied through Ultrabase-AppMigration.ps1.';
+  'Append-only checksum ledger of application migrations applied through Ultrabase-AppMigration.ps1.';
 comment on table public.core_app_migration_runs is
   'Operational audit trail for migration apply/verify/adopt runs.';
 
