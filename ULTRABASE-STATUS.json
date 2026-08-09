@@ -82,6 +82,12 @@
     "administrative_credentials_in_connection_files": false,
     "prompt_for_apps": "ultrabase/runtime/PROMPT-PARA-CONECTAR-QUALQUER-APP.md"
   },
+  "entrypoint": {
+    "user_entrypoint": "RUN.bat",
+    "single_entrypoint_policy": true,
+    "shared_machine_engine": "D:/AGENT_SYNC/motor-run.ps1",
+    "legacy_internal_scripts_are_not_user_entrypoints": true
+  },
   "multiapp_architecture": {
     "physical_projects": 1,
     "physical_database": "postgres",
@@ -97,7 +103,8 @@
     "repository_implementation": "merged",
     "feature_commit": "5cb48f6a08a851ee93af12906b4dba18d6322a36",
     "controller": "ultrabase/runtime/Ultrabase-AppMigration.ps1",
-    "launcher": "ultrabase/12-GERENCIAR-MIGRATIONS-APP.cmd",
+    "controller_is_internal_not_user_launcher": true,
+    "user_entrypoint": "RUN.bat",
     "manifest_schema": "ultrabase/runtime/ultrabase.app.schema.json",
     "platform_registry_migration": "ultrabase/migrations/20260809022000_core_app_registry.sql",
     "platform_registry_runtime_state": "installed_on_first_governed_apply_if_not_present",
