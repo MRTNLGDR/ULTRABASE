@@ -47,7 +47,8 @@ export function generateValues() {
   const privateJwk = { ...common, key_ops: ['sign', 'verify'], d: jwk.d }
   const publicJwk = { ...common, key_ops: ['verify'] }
   return {
-    COMPOSE_FILE: 'docker-compose.yml:docker-compose.ultrabase-local.yml',
+    COMPOSE_FILE: 'docker-compose.yml:docker-compose.ultrabase-local.yml:docker-compose.logs.yml',
+    COMPOSE_PATH_SEPARATOR: ':',
     POSTGRES_PASSWORD: hex(24), JWT_SECRET: secret,
     ANON_KEY: signHs(anon, secret), SERVICE_ROLE_KEY: signHs(service, secret),
     SUPABASE_PUBLISHABLE_KEY: opaque('sb_publishable_'),
