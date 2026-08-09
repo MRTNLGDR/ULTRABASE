@@ -136,9 +136,12 @@ async function proveRls({ baseUrl, tableName, publishableKey, users, runId }) {
   if (visibleToUserOne.length !== 1 || visibleToUserOne[0].note !== noteOne) throw new Error('RLS failed to isolate user one')
   if (visibleToUserTwo.length !== 1 || visibleToUserTwo[0].note !== noteTwo) throw new Error('RLS failed to isolate user two')
 
-  await request(`${baseUrl}/rest/v1/${tableName}?select=id`, {
+  const anonymousRows = jsonBody(await request(`${baseUrl}/rest/v1/${tableName}?select=id`, {
     headers: apiHeaders(publishableKey, publishableKey),
-  }, [401, 403])
+  }, [200]))
+  if (!Array.isArray(anonymousRows) || anonymousRows.length !== 0) {
+    throw new Error('RLS leak: anonymous role can see protected rows')
+  }
 }
 
 async function verifyGraphql(baseUrl, publishableKey, accessToken) {
