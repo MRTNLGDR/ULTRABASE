@@ -38,12 +38,12 @@ function New-Fixture {
         edge_functions = @($EdgeFunctions)
         shared_dependencies = @('auth.users')
     }
-    if ($null -ne $SourceRepository) { $manifest.source_repository = $SourceRepository }
+    if (-not [string]::IsNullOrWhiteSpace($SourceRepository)) { $manifest.source_repository = $SourceRepository }
     $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $appRoot 'ultrabase.app.json') -Encoding UTF8
 
     if ($MigrationsPath -eq 'supabase/migrations') {
         Set-Content -LiteralPath (Join-Path $migrationDir $MigrationName) -Value $Sql -Encoding UTF8
-        if ($null -ne $RollbackSql) {
+        if (-not [string]::IsNullOrEmpty($RollbackSql)) {
             $rollbackName = $MigrationName -replace '\.sql$', '.rollback.sql'
             Set-Content -LiteralPath (Join-Path $migrationDir $rollbackName) -Value $RollbackSql -Encoding UTF8
         }
