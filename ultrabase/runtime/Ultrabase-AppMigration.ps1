@@ -143,9 +143,7 @@ function Invoke-PlatformRegistryMigration {
     }
 
     Invoke-DbFile -Path $PlatformMigration | Out-Null
-    if (-not (Test-CoreRegistry)) {
-        throw 'Registro core não existe após a migration de plataforma.'
-    }
+    if (-not (Test-CoreRegistry)) { throw 'Registro core não existe após a migration de plataforma.' }
 
     $name = [System.IO.Path]::GetFileName($PlatformMigration)
     $sha = Get-Sha256 -Path $PlatformMigration
@@ -163,9 +161,7 @@ function Invoke-FullBackup {
     }
 
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $CoreScript -Action backup
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Backup obrigatório falhou. Nenhuma migration será aplicada.'
-    }
+    if ($LASTEXITCODE -ne 0) { throw 'Backup obrigatório falhou. Nenhuma migration será aplicada.' }
 
     $after = @(Get-ChildItem -LiteralPath $DockerBackupDir -Filter '*-manifest.txt' -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTimeUtc -Descending)
@@ -252,9 +248,7 @@ function Get-MigrationDescriptor([System.IO.FileInfo]$File, [string]$Slug, [stri
 
 function Read-AppContract([string]$Root) {
     $manifestPath = Join-Path $Root $ManifestName
-    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-        throw "Manifesto obrigatório ausente: $manifestPath"
-    }
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Manifesto obrigatório ausente: $manifestPath" }
 
     try {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -284,6 +278,9 @@ function Read-AppContract([string]$Root) {
         }
     }
 
+    $allowAnonymous = $false
+    if ($manifest.PSObject.Properties['allow_anonymous']) { $allowAnonymous = [bool]$manifest.allow_anonymous }
+
     $migrationDir = Resolve-SafeChildPath -Base $Root -Relative ([string]$manifest.migrations_path)
     if (-not (Test-Path -LiteralPath $migrationDir -PathType Container)) { throw "Pasta de migrations não existe: $migrationDir" }
 
@@ -291,16 +288,18 @@ function Read-AppContract([string]$Root) {
     if ($manifest.PSObject.Properties['buckets']) { $buckets = @($manifest.buckets) }
     $externalSlug = $slug.Replace('_', '-')
     foreach ($bucket in $buckets) {
-        if (-not ([string]$bucket).StartsWith("$externalSlug-", [System.StringComparison]::Ordinal)) {
-            throw "Bucket fora do namespace do app: $bucket"
+        $bucketName = [string]$bucket
+        if ($bucketName -notmatch '^[a-z0-9][a-z0-9-]{1,62}$' -or -not $bucketName.StartsWith("$externalSlug-", [System.StringComparison]::Ordinal)) {
+            throw "Bucket inválido ou fora do namespace do app: $bucketName"
         }
     }
 
     $edgeFunctions = @()
     if ($manifest.PSObject.Properties['edge_functions']) { $edgeFunctions = @($manifest.edge_functions) }
-    foreach ($functionName in $edgeFunctions) {
-        if (-not ([string]$functionName).StartsWith("$externalSlug-", [System.StringComparison]::Ordinal)) {
-            throw "Edge Function fora do namespace do app: $functionName"
+    foreach ($functionNameValue in $edgeFunctions) {
+        $functionName = [string]$functionNameValue
+        if ($functionName -notmatch '^[a-z0-9][a-z0-9-]{1,62}$' -or -not $functionName.StartsWith("$externalSlug-", [System.StringComparison]::Ordinal)) {
+            throw "Edge Function inválida ou fora do namespace do app: $functionName"
         }
     }
 
@@ -323,6 +322,7 @@ function Read-AppContract([string]$Root) {
         migrations = $migrations
         buckets = $buckets
         edge_functions = $edgeFunctions
+        allow_anonymous = $allowAnonymous
     }
 }
 
@@ -363,11 +363,12 @@ function Register-App([object]$Contract) {
     $bucketJson = ConvertTo-JsonArray -Items $Contract.buckets
     $edgeJson = ConvertTo-JsonArray -Items $Contract.edge_functions
     $depsJson = ConvertTo-JsonArray -Items $dependencies
+    $allowAnonymousSql = if ($Contract.allow_anonymous) { 'true' } else { 'false' }
 
     Invoke-DbQuery @"
 insert into public.core_applications (
   app_slug, display_name, table_prefix, schema_version, source_repository,
-  manifest_sha256, migrations_path, buckets, edge_functions, shared_dependencies, status
+  manifest_sha256, migrations_path, allow_anonymous, buckets, edge_functions, shared_dependencies, status
 ) values (
   $(ConvertTo-SqlLiteral $Contract.slug),
   $(ConvertTo-SqlLiteral ([string]$m.display_name)),
@@ -376,6 +377,7 @@ insert into public.core_applications (
   $(ConvertTo-SqlLiteral $sourceRepository),
   $(ConvertTo-SqlLiteral $Contract.manifest_sha256),
   $(ConvertTo-SqlLiteral ([string]$m.migrations_path)),
+  $allowAnonymousSql,
   $(ConvertTo-SqlLiteral $bucketJson)::jsonb,
   $(ConvertTo-SqlLiteral $edgeJson)::jsonb,
   $(ConvertTo-SqlLiteral $depsJson)::jsonb,
@@ -385,6 +387,7 @@ on conflict (app_slug) do update set
   display_name=excluded.display_name,
   manifest_sha256=excluded.manifest_sha256,
   migrations_path=excluded.migrations_path,
+  allow_anonymous=excluded.allow_anonymous,
   buckets=excluded.buckets,
   edge_functions=excluded.edge_functions,
   shared_dependencies=excluded.shared_dependencies,
@@ -438,6 +441,56 @@ function Compare-MigrationState([object]$Contract, [hashtable]$Applied) {
         throw "Migrations aplicadas sumiram do repositório: $($missing -join ', '). Histórico aplicado não pode ser apagado."
     }
     return [pscustomobject]@{ pending = $pending; verified = $verified }
+}
+
+function Assert-AppRuntimeContract([object]$Contract) {
+    $tablesWithoutRls = Invoke-DbQuery @"
+select c.relname
+from pg_class c
+join pg_namespace n on n.oid=c.relnamespace
+where n.nspname='public'
+  and c.relkind in ('r','p')
+  and starts_with(c.relname, $(ConvertTo-SqlLiteral $Contract.prefix))
+  and not c.relrowsecurity
+order by c.relname;
+"@
+    $tablesWithoutRls = @($tablesWithoutRls | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($tablesWithoutRls.Count -gt 0) {
+        throw "Tabelas do app sem RLS: $($tablesWithoutRls -join ', ')"
+    }
+
+    if (-not $Contract.allow_anonymous) {
+        $anonGrants = Invoke-DbQuery @"
+select distinct table_name
+from information_schema.role_table_grants
+where grantee='anon'
+  and table_schema='public'
+  and starts_with(table_name, $(ConvertTo-SqlLiteral $Contract.prefix))
+order by table_name;
+"@
+        $anonGrants = @($anonGrants | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($anonGrants.Count -gt 0) {
+            throw "allow_anonymous=false, mas anon possui grants em: $($anonGrants -join ', ')"
+        }
+    }
+
+    $missingBuckets = @()
+    foreach ($bucket in $Contract.buckets) {
+        $rows = Invoke-DbQuery "select count(*) from storage.buckets where id=$(ConvertTo-SqlLiteral ([string]$bucket));"
+        if ([int]$rows[0] -ne 1) { $missingBuckets += [string]$bucket }
+    }
+    if ($missingBuckets.Count -gt 0) {
+        throw "Buckets declarados ainda não existem no Storage: $($missingBuckets -join ', '). Crie-os pelo Studio/API, não por DML direto no schema storage."
+    }
+
+    $missingFunctions = @()
+    foreach ($functionName in $Contract.edge_functions) {
+        $indexPath = Join-Path $RepoRoot ("docker\volumes\functions\$functionName\index.ts")
+        if (-not (Test-Path -LiteralPath $indexPath -PathType Leaf)) { $missingFunctions += [string]$functionName }
+    }
+    if ($missingFunctions.Count -gt 0) {
+        throw "Edge Functions declaradas não estão implantadas no runtime: $($missingFunctions -join ', ')"
+    }
 }
 
 function New-MigrationRun([string]$Slug, [int]$PendingCount, [string]$BackupManifest) {
@@ -566,9 +619,7 @@ if ($Action -eq 'plan' -and $null -eq $registration) {
     exit 0
 }
 
-if ($Action -eq 'verify' -and $null -eq $registration) {
-    throw "App $($contract.slug) não está registrado no Ultrabase."
-}
+if ($Action -eq 'verify' -and $null -eq $registration) { throw "App $($contract.slug) não está registrado no Ultrabase." }
 
 if ($Action -eq 'apply' -and $null -eq $registration) {
     Assert-PrefixAvailable -Slug $contract.slug -Prefix $contract.prefix
@@ -587,6 +638,7 @@ if ($Action -eq 'plan') {
 if ($Action -eq 'verify') {
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $CoreScript -Action verify
     if ($LASTEXITCODE -ne 0) { throw 'Validação central do Ultrabase falhou.' }
+    Assert-AppRuntimeContract -Contract $contract
     $status = if ($state.pending.Count -eq 0) { 'verified' } else { 'pending_migrations' }
     Write-Result (New-Result -Status $status -Contract $contract -AppliedCount $state.verified.Count -PendingCount $state.pending.Count -RegistryState 'ready' -BackupManifest $null -PendingNames @($state.pending.name))
     if ($state.pending.Count -gt 0) { exit 3 }
@@ -600,7 +652,10 @@ if ($destructivePending.Count -gt 0 -and -not $AllowDestructive) {
 
 if ($state.pending.Count -eq 0) {
     Register-App -Contract $contract
-    Write-Result (New-Result -Status 'already_current' -Contract $contract -AppliedCount $state.verified.Count -PendingCount 0 -RegistryState 'ready' -BackupManifest $backupManifest -PendingNames @())
+    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $CoreScript -Action verify
+    if ($LASTEXITCODE -ne 0) { throw 'Validação central do Ultrabase falhou.' }
+    Assert-AppRuntimeContract -Contract $contract
+    Write-Result (New-Result -Status 'already_current_verified' -Contract $contract -AppliedCount $state.verified.Count -PendingCount 0 -RegistryState 'ready' -BackupManifest $backupManifest -PendingNames @())
     exit 0
 }
 
@@ -611,25 +666,26 @@ $ultrabaseCommit = Get-GitCommit -Root $RepoRoot
 $appCommit = Get-GitCommit -Root $contract.root
 $runId = New-MigrationRun -Slug $contract.slug -PendingCount $state.pending.Count -BackupManifest $backupManifest
 $appliedNow = 0
+$finalState = $null
 try {
     foreach ($migration in $state.pending) {
         Write-Host "Aplicando $($migration.name)..." -ForegroundColor Cyan
         Invoke-AppMigrationAtomic -Contract $contract -Migration $migration -UltrabaseCommit $ultrabaseCommit -AppCommit $appCommit
         $appliedNow++
     }
+
+    $finalApplied = Get-AppliedMigrations -Slug $contract.slug
+    $finalState = Compare-MigrationState -Contract $contract -Applied $finalApplied
+    if ($finalState.pending.Count -ne 0) { throw "Aplicação terminou com migrations pendentes: $($finalState.pending.name -join ', ')" }
+
+    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $CoreScript -Action verify
+    if ($LASTEXITCODE -ne 0) { throw 'Migrations aplicadas, mas a verificação central do Ultrabase falhou.' }
+    Assert-AppRuntimeContract -Contract $contract
+
     Complete-MigrationRun -RunId $runId -Status 'succeeded' -AppliedCount $appliedNow -ErrorMessage $null
 } catch {
     Complete-MigrationRun -RunId $runId -Status 'failed' -AppliedCount $appliedNow -ErrorMessage $_.Exception.Message
     throw
-}
-
-$finalApplied = Get-AppliedMigrations -Slug $contract.slug
-$finalState = Compare-MigrationState -Contract $contract -Applied $finalApplied
-if ($finalState.pending.Count -ne 0) { throw "Aplicação terminou com migrations pendentes: $($finalState.pending.name -join ', ')" }
-
-& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $CoreScript -Action verify
-if ($LASTEXITCODE -ne 0) {
-    throw 'Migrations foram aplicadas, mas a verificação completa falhou. Não faça cutover; use o backup e o rollback versionado.'
 }
 
 Write-Result (New-Result -Status 'applied_and_verified' -Contract $contract -AppliedCount $finalState.verified.Count -PendingCount 0 -RegistryState 'ready' -BackupManifest $backupManifest -PendingNames @())
