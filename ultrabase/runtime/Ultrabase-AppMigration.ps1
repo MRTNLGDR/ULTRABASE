@@ -8,7 +8,6 @@ param(
     [string]$AppRoot,
 
     [switch]$AllowDestructive,
-    [switch]$SkipBackup,
     [switch]$Json
 )
 
@@ -27,10 +26,12 @@ $ManifestName = 'ultrabase.app.json'
 $ReservedSlugs = @('auth', 'storage', 'realtime', 'extensions', 'supabase_functions', 'vault', 'graphql', 'core')
 
 function ConvertTo-SqlLiteral([AllowNull()][string]$Value) {
-    if ($null -eq $Value) {
-        return 'null'
-    }
+    if ($null -eq $Value) { return 'null' }
     return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function ConvertTo-JsonArray([object[]]$Items) {
+    return (ConvertTo-Json -InputObject @($Items) -Compress -Depth 8)
 }
 
 function Get-Sha256([string]$Path) {
@@ -66,17 +67,15 @@ function Require-Command([string]$Name, [string]$Message) {
 function Invoke-RuntimeEnsure {
     Require-Command 'docker' 'Instale/inicie o Docker Desktop antes de usar o runtime Ultrabase.'
     $raw = & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $RuntimeScript -Action ensure -Json
-    $exit = $LASTEXITCODE
-    if ($exit -eq 2) {
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -eq 2) {
         throw 'Ultrabase está pausado conscientemente. Retome pelo launcher oficial antes de aplicar migrations.'
     }
-    if ($exit -ne 0) {
-        throw "Ultrabase-Runtime.ps1 falhou com código $exit."
+    if ($exitCode -ne 0) {
+        throw "Ultrabase-Runtime.ps1 falhou com código $exitCode."
     }
     $health = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
-    if (-not $health.ready) {
-        throw 'Runtime Ultrabase não confirmou ready=true.'
-    }
+    if (-not $health.ready) { throw 'Runtime Ultrabase não confirmou ready=true.' }
     return $health
 }
 
@@ -88,14 +87,16 @@ function Invoke-DbQuery([string]$Sql) {
     return @($output | ForEach-Object { [string]$_ })
 }
 
-function Invoke-DbFile([string]$Path) {
+function Invoke-DbFile([string]$Path, [switch]$SingleTransaction) {
     $remote = "/tmp/ultrabase-$([guid]::NewGuid().ToString('N')).sql"
     try {
         & docker cp $Path "supabase-db:$remote" *> $null
-        if ($LASTEXITCODE -ne 0) {
-            throw "docker cp falhou para $Path"
-        }
-        $output = & docker exec supabase-db psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 --single-transaction -f $remote 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "docker cp falhou para $Path" }
+
+        $args = @('exec', 'supabase-db', 'psql', '-X', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1')
+        if ($SingleTransaction) { $args += '--single-transaction' }
+        $args += @('-f', $remote)
+        $output = & docker @args 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "Migration falhou: $Path`n$($output -join [Environment]::NewLine)"
         }
@@ -106,18 +107,53 @@ function Invoke-DbFile([string]$Path) {
 }
 
 function Test-CoreRegistry {
-    $result = Invoke-DbQuery "select case when to_regclass('public.core_applications') is null then '0' else '1' end;"
+    $sql = @"
+select case when
+  to_regclass('public.core_platform_migrations') is not null and
+  to_regclass('public.core_applications') is not null and
+  to_regclass('public.core_app_migrations') is not null and
+  to_regclass('public.core_app_migration_runs') is not null
+then '1' else '0' end;
+"@
+    $result = Invoke-DbQuery $sql
     return ($result.Count -gt 0 -and $result[0].Trim() -eq '1')
+}
+
+function Assert-PlatformRegistryIntegrity {
+    if (-not (Test-CoreRegistry)) { return $false }
+    $name = [System.IO.Path]::GetFileName($PlatformMigration)
+    $expected = Get-Sha256 -Path $PlatformMigration
+    $rows = Invoke-DbQuery "select migration_sha256 from public.core_platform_migrations where migration_name=$(ConvertTo-SqlLiteral $name);"
+    if ($rows.Count -eq 0) {
+        throw 'Registro core existe sem checksum da migration de plataforma. Estado incompleto; não será alterado automaticamente.'
+    }
+    if ($rows[0].Trim() -ne $expected) {
+        throw "Migration de plataforma aplicada foi modificada: $name. Crie nova migration core em vez de reescrever histórico."
+    }
+    return $true
 }
 
 function Invoke-PlatformRegistryMigration {
     if (-not (Test-Path -LiteralPath $PlatformMigration -PathType Leaf)) {
         throw "Migration de plataforma ausente: $PlatformMigration"
     }
+    if (Test-CoreRegistry) {
+        Assert-PlatformRegistryIntegrity | Out-Null
+        return
+    }
+
     Invoke-DbFile -Path $PlatformMigration | Out-Null
     if (-not (Test-CoreRegistry)) {
-        throw 'core_applications não existe após a migration de plataforma.'
+        throw 'Registro core não existe após a migration de plataforma.'
     }
+
+    $name = [System.IO.Path]::GetFileName($PlatformMigration)
+    $sha = Get-Sha256 -Path $PlatformMigration
+    Invoke-DbQuery @"
+insert into public.core_platform_migrations (migration_name, migration_sha256, metadata)
+values ($(ConvertTo-SqlLiteral $name), $(ConvertTo-SqlLiteral $sha), '{"source":"Ultrabase repository"}'::jsonb);
+"@ | Out-Null
+    Assert-PlatformRegistryIntegrity | Out-Null
 }
 
 function Invoke-FullBackup {
@@ -133,38 +169,48 @@ function Invoke-FullBackup {
 
     $after = @(Get-ChildItem -LiteralPath $DockerBackupDir -Filter '*-manifest.txt' -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTimeUtc -Descending)
-    if ($after.Count -eq 0) {
-        throw 'Backup terminou sem manifesto verificável.'
-    }
-
+    if ($after.Count -eq 0) { throw 'Backup terminou sem manifesto verificável.' }
     $manifest = $after[0].FullName
-    if ($before -contains $manifest) {
-        throw 'Nenhum novo manifesto de backup foi criado.'
-    }
+    if ($before -contains $manifest) { throw 'Nenhum novo manifesto de backup foi criado.' }
     return $manifest
 }
 
-function Test-InternalSchemaMutation([string]$Sql, [string]$FileName) {
-    $internalMutation = '(?is)\b(?:alter\s+table|drop\s+(?:table|schema|function|procedure|view|type)|truncate\s+(?:table\s+)?|insert\s+into|update|delete\s+from|create\s+table)\s+(?:if\s+(?:not\s+)?exists\s+)?(?:auth|storage|realtime|extensions|supabase_functions|vault|graphql)\.'
+function Assert-SqlSafe([string]$Sql, [string]$FileName, [string]$Prefix) {
+    if ([string]::IsNullOrWhiteSpace($Sql)) { throw "SQL vazio: $FileName" }
+
+    if ($Sql -match '(?im)^\s*(?:begin|commit|rollback)\s*;') {
+        throw "$FileName contém controle explícito de transação. O Ultrabase aplica migration + ledger atomicamente e controla a transação."
+    }
+    if ($Sql -match '(?i)\bconcurrently\b') {
+        throw "$FileName usa CONCURRENTLY, que não é compatível com o gate transacional atômico do Ultrabase."
+    }
+    if ($Sql -match '(?i)(SUPABASE_SECRET_KEY|SERVICE_ROLE_KEY|POSTGRES_PASSWORD|JWT_SECRET)\s*[:=]\s*[^\s<]+') {
+        throw "$FileName parece conter segredo/credencial. Migrations nunca podem transportar segredos."
+    }
+    if ($Sql -match '(?is)\b(?:create|alter|drop)\s+(?:role|user|database|schema|extension)\b') {
+        throw "$FileName tenta administrar role/database/schema/extension. Dependências compartilhadas pertencem à governança core do Ultrabase."
+    }
+
+    $internalMutation = '(?is)\b(?:alter\s+table|drop\s+(?:table|function|procedure|view|type)|truncate\s+(?:table\s+)?|insert\s+into|update|delete\s+from|create\s+table)\s+(?:if\s+(?:not\s+)?exists\s+)?(?:auth|storage|realtime|extensions|supabase_functions|vault|graphql)\.'
     if ($Sql -match $internalMutation) {
-        throw "$FileName tenta modificar diretamente um schema interno do Supabase. Policies em storage.objects são permitidas; DDL/DML interno não é."
-    }
-}
-
-function Test-PublicObjectOwnership([string]$Sql, [string]$Prefix, [string]$FileName) {
-    $createPattern = '(?is)\bcreate\s+(?:or\s+replace\s+)?(?:table|view|materialized\s+view|function|procedure|sequence)\s+(?:if\s+not\s+exists\s+)?public\.([a-zA-Z_][a-zA-Z0-9_]*)'
-    foreach ($match in [regex]::Matches($Sql, $createPattern)) {
-        $name = $match.Groups[1].Value.ToLowerInvariant()
-        if (-not $name.StartsWith($Prefix, [System.StringComparison]::Ordinal)) {
-            throw "$FileName cria public.$name fora do prefixo reservado $Prefix"
-        }
+        throw "$FileName tenta modificar diretamente schema interno do Supabase. Referências e policies em storage.objects são permitidas; DDL/DML interno não é."
     }
 
-    $mutatePattern = '(?is)\b(?:alter\s+table|drop\s+(?:table|view|function|procedure|sequence)|truncate\s+(?:table\s+)?|insert\s+into|update|delete\s+from)\s+(?:if\s+exists\s+)?public\.([a-zA-Z_][a-zA-Z0-9_]*)'
-    foreach ($match in [regex]::Matches($Sql, $mutatePattern)) {
-        $name = $match.Groups[1].Value.ToLowerInvariant()
-        if (-not $name.StartsWith($Prefix, [System.StringComparison]::Ordinal)) {
-            throw "$FileName altera public.$name fora do prefixo reservado $Prefix"
+    $patterns = @(
+        '(?is)\bcreate\s+(?:or\s+replace\s+)?(?:table|view|materialized\s+view|function|procedure|sequence)\s+(?:if\s+not\s+exists\s+)?public\.([a-zA-Z_][a-zA-Z0-9_]*)',
+        '(?is)\b(?:alter\s+table|drop\s+(?:table|view|function|procedure|sequence)|truncate\s+(?:table\s+)?|insert\s+into|update|delete\s+from)\s+(?:if\s+exists\s+)?public\.([a-zA-Z_][a-zA-Z0-9_]*)',
+        '(?is)\b(?:create|alter|drop)\s+policy\b.*?\bon\s+public\.([a-zA-Z_][a-zA-Z0-9_]*)',
+        '(?is)\bcreate\s+(?:constraint\s+)?trigger\b.*?\bon\s+public\.([a-zA-Z_][a-zA-Z0-9_]*)',
+        '(?is)\balter\s+publication\s+supabase_realtime\s+add\s+table\s+public\.([a-zA-Z_][a-zA-Z0-9_]*)',
+        '(?is)\b(?:grant|revoke)\b.*?\bon\s+(?:table\s+)?public\.([a-zA-Z_][a-zA-Z0-9_]*)'
+    )
+
+    foreach ($pattern in $patterns) {
+        foreach ($match in [regex]::Matches($Sql, $pattern)) {
+            $name = $match.Groups[1].Value.ToLowerInvariant()
+            if (-not $name.StartsWith($Prefix, [System.StringComparison]::Ordinal)) {
+                throw "$FileName tenta criar/alterar public.$name fora do prefixo reservado $Prefix"
+            }
         }
     }
 }
@@ -176,25 +222,21 @@ function Get-MigrationDescriptor([System.IO.FileInfo]$File, [string]$Slug, [stri
     }
 
     $sql = Get-Content -LiteralPath $File.FullName -Raw
-    if ([string]::IsNullOrWhiteSpace($sql)) {
-        throw "Migration vazia: $($File.Name)"
-    }
+    Assert-SqlSafe -Sql $sql -FileName $File.Name -Prefix $Prefix
 
-    $secretPattern = '(?i)(SUPABASE_SECRET_KEY|SERVICE_ROLE_KEY|POSTGRES_PASSWORD|JWT_SECRET)\s*[:=]\s*[^\s<]+'
-    if ($sql -match $secretPattern) {
-        throw "$($File.Name) parece conter segredo/credencial. Migrations nunca podem transportar segredos."
-    }
-
-    Test-InternalSchemaMutation -Sql $sql -FileName $File.Name
-    Test-PublicObjectOwnership -Sql $sql -Prefix $Prefix -FileName $File.Name
-
-    $destructivePattern = '(?is)\b(?:drop\s+(?:table|view|function|procedure|type)|truncate\s+(?:table\s+)?|alter\s+table\b[^;]*\bdrop\s+(?:column|constraint)|delete\s+from\s+public\.)'
-    $destructive = ($sql -match $destructivePattern)
+    $destructive = ($sql -match '(?is)\b(?:drop\s+(?:table|view|function|procedure|type)|truncate\s+(?:table\s+)?|alter\s+table\b[^;]*\bdrop\s+(?:column|constraint)|delete\s+from\s+public\.)')
     $rollbackPath = [System.IO.Path]::ChangeExtension($File.FullName, $null) + '.rollback.sql'
     $rollback = if (Test-Path -LiteralPath $rollbackPath -PathType Leaf) { $rollbackPath } else { $null }
 
     if ($destructive -and -not $rollback) {
         throw "$($File.Name) contém operação destrutiva e não possui rollback irmão $([System.IO.Path]::GetFileName($rollbackPath))."
+    }
+
+    $rollbackSha = $null
+    if ($rollback) {
+        $rollbackSql = Get-Content -LiteralPath $rollback -Raw
+        Assert-SqlSafe -Sql $rollbackSql -FileName ([System.IO.Path]::GetFileName($rollback)) -Prefix $Prefix
+        $rollbackSha = Get-Sha256 -Path $rollback
     }
 
     return [pscustomobject]@{
@@ -204,6 +246,7 @@ function Get-MigrationDescriptor([System.IO.FileInfo]$File, [string]$Slug, [stri
         destructive = [bool]$destructive
         rollback_path = $rollback
         rollback_name = if ($rollback) { [System.IO.Path]::GetFileName($rollback) } else { $null }
+        rollback_sha256 = $rollbackSha
     }
 }
 
@@ -224,58 +267,50 @@ function Read-AppContract([string]$Root) {
             throw "Campo obrigatório ausente em ultrabase.app.json: $required"
         }
     }
-
-    if ([int]$manifest.schema_version -ne 1) {
-        throw "schema_version não suportado: $($manifest.schema_version). Esperado: 1"
-    }
+    if ([int]$manifest.schema_version -ne 1) { throw "schema_version não suportado: $($manifest.schema_version). Esperado: 1" }
 
     $slug = ([string]$manifest.app_slug).ToLowerInvariant()
-    if ($slug -notmatch '^[a-z][a-z0-9_]{1,23}$') {
-        throw "app_slug inválido: $slug"
-    }
-    if ($ReservedSlugs -contains $slug) {
-        throw "app_slug reservado pelo Ultrabase/Supabase: $slug"
-    }
+    if ($slug -notmatch '^[a-z][a-z0-9_]{1,23}$') { throw "app_slug inválido: $slug" }
+    if ($ReservedSlugs -contains $slug) { throw "app_slug reservado pelo Ultrabase/Supabase: $slug" }
 
     $prefix = ([string]$manifest.table_prefix).ToLowerInvariant()
-    if ($prefix -ne "${slug}_") {
-        throw "table_prefix deve ser exatamente ${slug}_"
+    if ($prefix -ne "${slug}_") { throw "table_prefix deve ser exatamente ${slug}_" }
+    if ([string]$manifest.database_owner -ne 'Ultrabase Local') { throw 'database_owner deve ser "Ultrabase Local" para esta instalação.' }
+
+    if ($manifest.PSObject.Properties['source_repository']) {
+        $sourceRepository = [string]$manifest.source_repository
+        if ($sourceRepository -match '^[a-z][a-z0-9+.-]*://[^/]*@') {
+            throw 'source_repository parece conter credencial embutida. Use URL pública sem token/usuário.'
+        }
     }
 
     $migrationDir = Resolve-SafeChildPath -Base $Root -Relative ([string]$manifest.migrations_path)
-    if (-not (Test-Path -LiteralPath $migrationDir -PathType Container)) {
-        throw "Pasta de migrations não existe: $migrationDir"
-    }
+    if (-not (Test-Path -LiteralPath $migrationDir -PathType Container)) { throw "Pasta de migrations não existe: $migrationDir" }
 
     $buckets = @()
     if ($manifest.PSObject.Properties['buckets']) { $buckets = @($manifest.buckets) }
+    $externalSlug = $slug.Replace('_', '-')
     foreach ($bucket in $buckets) {
-        $bucketText = [string]$bucket
-        if (-not $bucketText.StartsWith(($slug.Replace('_', '-') + '-'), [System.StringComparison]::Ordinal)) {
-            throw "Bucket fora do namespace do app: $bucketText"
+        if (-not ([string]$bucket).StartsWith("$externalSlug-", [System.StringComparison]::Ordinal)) {
+            throw "Bucket fora do namespace do app: $bucket"
         }
     }
 
     $edgeFunctions = @()
     if ($manifest.PSObject.Properties['edge_functions']) { $edgeFunctions = @($manifest.edge_functions) }
     foreach ($functionName in $edgeFunctions) {
-        $functionText = [string]$functionName
-        if (-not $functionText.StartsWith(($slug.Replace('_', '-') + '-'), [System.StringComparison]::Ordinal)) {
-            throw "Edge Function fora do namespace do app: $functionText"
+        if (-not ([string]$functionName).StartsWith("$externalSlug-", [System.StringComparison]::Ordinal)) {
+            throw "Edge Function fora do namespace do app: $functionName"
         }
     }
 
     $files = @(Get-ChildItem -LiteralPath $migrationDir -File -Filter '*.sql' |
         Where-Object { $_.Name -notlike '*.rollback.sql' } |
         Sort-Object Name)
-    if ($files.Count -eq 0) {
-        throw "Nenhuma migration encontrada em $migrationDir"
-    }
+    if ($files.Count -eq 0) { throw "Nenhuma migration encontrada em $migrationDir" }
 
     $migrations = @()
-    foreach ($file in $files) {
-        $migrations += Get-MigrationDescriptor -File $file -Slug $slug -Prefix $prefix
-    }
+    foreach ($file in $files) { $migrations += Get-MigrationDescriptor -File $file -Slug $slug -Prefix $prefix }
 
     return [pscustomobject]@{
         root = $Root
@@ -298,43 +333,38 @@ function Get-GitCommit([string]$Root) {
     return ([string]$value).Trim()
 }
 
-function Get-SourceRepository([string]$Root, [object]$Manifest) {
-    if ($Manifest.PSObject.Properties['source_repository'] -and -not [string]::IsNullOrWhiteSpace([string]$Manifest.source_repository)) {
-        return [string]$Manifest.source_repository
-    }
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
-    $value = & git -C $Root remote get-url origin 2>$null
-    if ($LASTEXITCODE -ne 0) { return $null }
-    return ([string]$value).Trim()
+function Get-AppRegistration([string]$Slug) {
+    $rows = Invoke-DbQuery "select table_prefix || E'\t' || manifest_sha256 from public.core_applications where app_slug=$(ConvertTo-SqlLiteral $Slug);"
+    if ($rows.Count -eq 0) { return $null }
+    $parts = $rows[0] -split "`t", 2
+    return [pscustomobject]@{ table_prefix = $parts[0]; manifest_sha256 = if ($parts.Count -gt 1) { $parts[1] } else { '' } }
 }
 
-function Get-AppliedMigrations([string]$Slug) {
-    $rows = Invoke-DbQuery "select migration_name || E'\t' || migration_sha256 from public.core_app_migrations where app_slug=$(ConvertTo-SqlLiteral $Slug) order by migration_name;"
-    $map = @{}
-    foreach ($row in $rows) {
-        if ([string]::IsNullOrWhiteSpace($row)) { continue }
-        $parts = $row -split "`t", 2
-        if ($parts.Count -eq 2) { $map[$parts[0]] = $parts[1] }
-    }
-    return $map
+function Assert-PrefixAvailable([string]$Slug, [string]$Prefix) {
+    $rows = Invoke-DbQuery "select app_slug from public.core_applications where table_prefix=$(ConvertTo-SqlLiteral $Prefix) and app_slug<>$(ConvertTo-SqlLiteral $Slug);"
+    if ($rows.Count -gt 0) { throw "table_prefix $Prefix já pertence ao app $($rows[0])." }
 }
 
 function Get-PrefixObjectCount([string]$Prefix) {
-    $prefixLiteral = ConvertTo-SqlLiteral ($Prefix + '%')
-    $rows = Invoke-DbQuery "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p','v','m','S') and c.relname like $prefixLiteral;"
+    $rows = Invoke-DbQuery "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p','v','m','S') and starts_with(c.relname, $(ConvertTo-SqlLiteral $Prefix));"
     return [int]$rows[0]
 }
 
 function Register-App([object]$Contract) {
+    Assert-PrefixAvailable -Slug $Contract.slug -Prefix $Contract.prefix
     $m = $Contract.manifest
-    $sourceRepo = Get-SourceRepository -Root $Contract.root -Manifest $m
-    $bucketsJson = ($Contract.buckets | ConvertTo-Json -Compress)
-    $edgeJson = ($Contract.edge_functions | ConvertTo-Json -Compress)
-    $deps = @()
-    if ($m.PSObject.Properties['shared_dependencies']) { $deps = @($m.shared_dependencies) }
-    $depsJson = ($deps | ConvertTo-Json -Compress)
+    $sourceRepository = $null
+    if ($m.PSObject.Properties['source_repository'] -and -not [string]::IsNullOrWhiteSpace([string]$m.source_repository)) {
+        $sourceRepository = [string]$m.source_repository
+    }
+    $dependencies = @()
+    if ($m.PSObject.Properties['shared_dependencies']) { $dependencies = @($m.shared_dependencies) }
 
-    $sql = @"
+    $bucketJson = ConvertTo-JsonArray -Items $Contract.buckets
+    $edgeJson = ConvertTo-JsonArray -Items $Contract.edge_functions
+    $depsJson = ConvertTo-JsonArray -Items $dependencies
+
+    Invoke-DbQuery @"
 insert into public.core_applications (
   app_slug, display_name, table_prefix, schema_version, source_repository,
   manifest_sha256, migrations_path, buckets, edge_functions, shared_dependencies, status
@@ -343,243 +373,248 @@ insert into public.core_applications (
   $(ConvertTo-SqlLiteral ([string]$m.display_name)),
   $(ConvertTo-SqlLiteral $Contract.prefix),
   1,
-  $(ConvertTo-SqlLiteral $sourceRepo),
+  $(ConvertTo-SqlLiteral $sourceRepository),
   $(ConvertTo-SqlLiteral $Contract.manifest_sha256),
   $(ConvertTo-SqlLiteral ([string]$m.migrations_path)),
-  $(ConvertTo-SqlLiteral $bucketsJson)::jsonb,
+  $(ConvertTo-SqlLiteral $bucketJson)::jsonb,
   $(ConvertTo-SqlLiteral $edgeJson)::jsonb,
   $(ConvertTo-SqlLiteral $depsJson)::jsonb,
   'active'
 )
 on conflict (app_slug) do update set
-  display_name = excluded.display_name,
-  manifest_sha256 = excluded.manifest_sha256,
-  migrations_path = excluded.migrations_path,
-  buckets = excluded.buckets,
-  edge_functions = excluded.edge_functions,
-  shared_dependencies = excluded.shared_dependencies,
-  source_repository = coalesce(excluded.source_repository, public.core_applications.source_repository),
-  updated_at = now()
-where public.core_applications.table_prefix = excluded.table_prefix;
-"@
-    Invoke-DbQuery $sql | Out-Null
+  display_name=excluded.display_name,
+  manifest_sha256=excluded.manifest_sha256,
+  migrations_path=excluded.migrations_path,
+  buckets=excluded.buckets,
+  edge_functions=excluded.edge_functions,
+  shared_dependencies=excluded.shared_dependencies,
+  source_repository=coalesce(excluded.source_repository, public.core_applications.source_repository),
+  updated_at=now()
+where public.core_applications.table_prefix=excluded.table_prefix;
+"@ | Out-Null
 
-    $registeredPrefix = Invoke-DbQuery "select table_prefix from public.core_applications where app_slug=$(ConvertTo-SqlLiteral $Contract.slug);"
-    if ($registeredPrefix.Count -eq 0 -or $registeredPrefix[0] -ne $Contract.prefix) {
-        throw "O app_slug $($Contract.slug) já está reservado com outro table_prefix."
+    $registered = Get-AppRegistration -Slug $Contract.slug
+    if ($null -eq $registered -or $registered.table_prefix -ne $Contract.prefix) {
+        throw "Falha ao reservar namespace do app $($Contract.slug)."
     }
 }
 
-function New-MigrationRun([string]$Slug, [string]$RunAction, [int]$PendingCount, [AllowNull()][string]$BackupManifest) {
+function Get-AppliedMigrations([string]$Slug) {
+    $rows = Invoke-DbQuery "select migration_name || E'\t' || migration_sha256 || E'\t' || coalesce(rollback_sha256,'') from public.core_app_migrations where app_slug=$(ConvertTo-SqlLiteral $Slug) order by migration_name;"
+    $map = @{}
+    foreach ($row in $rows) {
+        if ([string]::IsNullOrWhiteSpace($row)) { continue }
+        $parts = $row -split "`t", 3
+        $map[$parts[0]] = [pscustomobject]@{
+            migration_sha256 = $parts[1]
+            rollback_sha256 = if ($parts.Count -gt 2 -and -not [string]::IsNullOrWhiteSpace($parts[2])) { $parts[2] } else { $null }
+        }
+    }
+    return $map
+}
+
+function Compare-MigrationState([object]$Contract, [hashtable]$Applied) {
+    $pending = @()
+    $verified = @()
+    $currentNames = @($Contract.migrations | ForEach-Object { $_.name })
+
+    foreach ($migration in $Contract.migrations) {
+        if (-not $Applied.ContainsKey($migration.name)) {
+            $pending += $migration
+            continue
+        }
+        $record = $Applied[$migration.name]
+        if ($record.migration_sha256 -ne $migration.sha256) {
+            throw "Migration aplicada foi modificada: $($migration.name). Crie nova migration em vez de reescrever histórico."
+        }
+        if ($record.rollback_sha256 -ne $migration.rollback_sha256) {
+            throw "Rollback versionado mudou após aplicação: $($migration.rollback_name). Rollback também é artefato imutável."
+        }
+        $verified += $migration
+    }
+
+    $missing = @($Applied.Keys | Where-Object { $_ -notin $currentNames })
+    if ($missing.Count -gt 0) {
+        throw "Migrations aplicadas sumiram do repositório: $($missing -join ', '). Histórico aplicado não pode ser apagado."
+    }
+    return [pscustomobject]@{ pending = $pending; verified = $verified }
+}
+
+function New-MigrationRun([string]$Slug, [int]$PendingCount, [string]$BackupManifest) {
     $rows = Invoke-DbQuery @"
 insert into public.core_app_migration_runs (app_slug, action, status, pending_count, backup_manifest)
-values ($(ConvertTo-SqlLiteral $Slug), $(ConvertTo-SqlLiteral $RunAction), 'running', $PendingCount, $(ConvertTo-SqlLiteral $BackupManifest))
+values ($(ConvertTo-SqlLiteral $Slug), 'apply', 'running', $PendingCount, $(ConvertTo-SqlLiteral $BackupManifest))
 returning id::text;
 "@
-    if ($rows.Count -eq 0) { throw 'Não foi possível criar registro de execução de migration.' }
+    if ($rows.Count -eq 0) { throw 'Não foi possível criar registro da execução.' }
     return $rows[0].Trim()
 }
 
 function Complete-MigrationRun([string]$RunId, [string]$Status, [int]$AppliedCount, [AllowNull()][string]$ErrorMessage) {
     Invoke-DbQuery @"
 update public.core_app_migration_runs
-set status=$(ConvertTo-SqlLiteral $Status),
-    applied_count=$AppliedCount,
-    error_message=$(ConvertTo-SqlLiteral $ErrorMessage),
-    finished_at=now()
+set status=$(ConvertTo-SqlLiteral $Status), applied_count=$AppliedCount,
+    error_message=$(ConvertTo-SqlLiteral $ErrorMessage), finished_at=now()
 where id=$(ConvertTo-SqlLiteral $RunId)::uuid;
 "@ | Out-Null
 }
 
-function Record-Migration([object]$Contract, [object]$Migration, [AllowNull()][string]$Commit) {
-    $metadata = [ordered]@{
-        manifest_sha256 = $Contract.manifest_sha256
-        source_root = $Contract.root
-    } | ConvertTo-Json -Compress
+function Invoke-AppMigrationAtomic([object]$Contract, [object]$Migration, [AllowNull()][string]$UltrabaseCommit, [AllowNull()][string]$AppCommit) {
+    $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("ultrabase-app-" + [guid]::NewGuid().ToString('N') + '.sql')
+    try {
+        $sql = Get-Content -LiteralPath $Migration.path -Raw
+        $metadata = [ordered]@{ manifest_sha256 = $Contract.manifest_sha256 } | ConvertTo-Json -Compress
+        $destructiveSql = if ($Migration.destructive) { 'true' } else { 'false' }
+        $ledger = @"
 
-    Invoke-DbQuery @"
+-- Ultrabase atomic migration ledger entry. Runs in the same transaction as the migration above.
 insert into public.core_app_migrations (
-  app_slug, migration_name, migration_sha256, destructive, rollback_name, ultrabase_commit, metadata
+  app_slug, migration_name, migration_sha256, destructive, rollback_name, rollback_sha256,
+  ultrabase_commit, app_commit, metadata
 ) values (
   $(ConvertTo-SqlLiteral $Contract.slug),
   $(ConvertTo-SqlLiteral $Migration.name),
   $(ConvertTo-SqlLiteral $Migration.sha256),
-  $(if ($Migration.destructive) { 'true' } else { 'false' }),
+  $destructiveSql,
   $(ConvertTo-SqlLiteral $Migration.rollback_name),
-  $(ConvertTo-SqlLiteral $Commit),
+  $(ConvertTo-SqlLiteral $Migration.rollback_sha256),
+  $(ConvertTo-SqlLiteral $UltrabaseCommit),
+  $(ConvertTo-SqlLiteral $AppCommit),
   $(ConvertTo-SqlLiteral $metadata)::jsonb
 );
-"@ | Out-Null
+"@
+        [System.IO.File]::WriteAllText($tempFile, $sql + $ledger, [System.Text.UTF8Encoding]::new($false))
+        Invoke-DbFile -Path $tempFile -SingleTransaction | Out-Null
+    } finally {
+        if (Test-Path -LiteralPath $tempFile) { Remove-Item -LiteralPath $tempFile -Force }
+    }
 }
 
-function Compare-MigrationState([object]$Contract, [hashtable]$Applied) {
-    $pending = @()
-    $verified = @()
-    foreach ($migration in $Contract.migrations) {
-        if ($Applied.ContainsKey($migration.name)) {
-            if ($Applied[$migration.name] -ne $migration.sha256) {
-                throw "Migration já aplicada foi modificada: $($migration.name). Esperado $($Applied[$migration.name]); atual $($migration.sha256). Crie uma nova migration em vez de reescrever histórico."
-            }
-            $verified += $migration
-        } else {
-            $pending += $migration
-        }
+function New-Result([string]$Status, [object]$Contract, [int]$AppliedCount, [int]$PendingCount, [string]$RegistryState, [AllowNull()][string]$BackupManifest, [object[]]$PendingNames) {
+    return [pscustomobject]@{
+        action = $Action
+        status = $Status
+        app_slug = $Contract.slug
+        manifest = $Contract.manifest_path
+        total_migrations = $Contract.migrations.Count
+        applied_migrations = $AppliedCount
+        pending_migrations = $PendingCount
+        pending = @($PendingNames)
+        platform_registry = $RegistryState
+        backup_manifest = $BackupManifest
     }
-
-    $missingFiles = @($Applied.Keys | Where-Object { $_ -notin @($Contract.migrations.name) })
-    if ($missingFiles.Count -gt 0) {
-        throw "Migrations aplicadas sumiram do repositório: $($missingFiles -join ', '). O histórico versionado não pode ser apagado."
-    }
-
-    return [pscustomobject]@{ pending = $pending; verified = $verified }
 }
 
 function Write-Result([object]$Result) {
-    if ($Json) {
-        $Result | ConvertTo-Json -Depth 12
-        return
-    }
-
+    if ($Json) { $Result | ConvertTo-Json -Depth 12; return }
     Write-Host ''
     Write-Host 'Ultrabase App Migration' -ForegroundColor Magenta
-    Write-Host "Ação:             $($Result.action)"
-    Write-Host "App:              $($Result.app_slug)"
-    Write-Host "Manifesto:        $($Result.manifest)"
-    Write-Host "Migrations:       $($Result.total_migrations)"
-    Write-Host "Aplicadas:        $($Result.applied_migrations)"
-    Write-Host "Pendentes:        $($Result.pending_migrations)"
-    Write-Host "Registro core:    $($Result.platform_registry)"
-    if ($Result.PSObject.Properties['backup_manifest'] -and $Result.backup_manifest) {
-        Write-Host "Backup:           $($Result.backup_manifest)"
-    }
-    if ($Result.PSObject.Properties['status']) {
-        Write-Host "Estado:           $($Result.status)" -ForegroundColor Green
-    }
+    Write-Host "Ação:          $($Result.action)"
+    Write-Host "App:           $($Result.app_slug)"
+    Write-Host "Migrations:    $($Result.total_migrations)"
+    Write-Host "Aplicadas:     $($Result.applied_migrations)"
+    Write-Host "Pendentes:     $($Result.pending_migrations)"
+    Write-Host "Registro core: $($Result.platform_registry)"
+    if ($Result.backup_manifest) { Write-Host "Backup:        $($Result.backup_manifest)" }
+    Write-Host "Estado:        $($Result.status)" -ForegroundColor Green
 }
 
 $appPath = Resolve-ExistingDirectory -Path $AppRoot
 $contract = Read-AppContract -Root $appPath
 
 if ($Action -eq 'validate') {
-    Write-Result ([pscustomobject]@{
-        action = $Action
-        app_slug = $contract.slug
-        manifest = $contract.manifest_path
-        total_migrations = $contract.migrations.Count
-        applied_migrations = 0
-        pending_migrations = $contract.migrations.Count
-        platform_registry = 'not_checked'
-        status = 'valid'
-    })
+    Write-Result (New-Result -Status 'valid' -Contract $contract -AppliedCount 0 -PendingCount $contract.migrations.Count -RegistryState 'not_checked' -BackupManifest $null -PendingNames @($contract.migrations.name))
     exit 0
 }
 
-$runtime = Invoke-RuntimeEnsure
+Invoke-RuntimeEnsure | Out-Null
 $registryExists = Test-CoreRegistry
 
-if (-not $registryExists -and $Action -eq 'verify') {
-    throw 'Registro core de apps ainda não está instalado. Execute Action=apply para a primeira aplicação governada.'
-}
-
-if (-not $registryExists -and $Action -eq 'plan') {
-    $existingObjects = Get-PrefixObjectCount -Prefix $contract.prefix
-    if ($existingObjects -gt 0) {
-        throw "O namespace $($contract.prefix) já possui $existingObjects objeto(s) no banco, mas não existe ledger core. Pare e faça uma adoção/migração explícita; não é seguro fingir que migrations nunca foram aplicadas."
+if (-not $registryExists) {
+    if ($Action -eq 'verify') { throw 'Registro core ainda não está instalado; não há como verificar ledger de migrations.' }
+    if ($Action -eq 'plan') {
+        $existingObjects = Get-PrefixObjectCount -Prefix $contract.prefix
+        if ($existingObjects -gt 0) {
+            throw "Namespace $($contract.prefix) já possui $existingObjects objeto(s), mas não existe ledger core. Adoção automática foi bloqueada."
+        }
+        Write-Result (New-Result -Status 'planned' -Contract $contract -AppliedCount 0 -PendingCount $contract.migrations.Count -RegistryState 'pending_install' -BackupManifest $null -PendingNames @($contract.migrations.name))
+        exit 0
     }
-    Write-Result ([pscustomobject]@{
-        action = $Action
-        app_slug = $contract.slug
-        manifest = $contract.manifest_path
-        total_migrations = $contract.migrations.Count
-        applied_migrations = 0
-        pending_migrations = $contract.migrations.Count
-        platform_registry = 'pending_install'
-        status = 'planned'
-    })
-    exit 0
 }
 
 $backupManifest = $null
 if ($Action -eq 'apply' -and -not $registryExists) {
     $existingObjects = Get-PrefixObjectCount -Prefix $contract.prefix
-    if ($existingObjects -gt 0) {
-        throw "O namespace $($contract.prefix) já possui $existingObjects objeto(s) sem ledger core. A aplicação automática foi bloqueada para impedir sobreposição de schema."
-    }
-    if (-not $SkipBackup) {
-        $backupManifest = Invoke-FullBackup
-    }
+    if ($existingObjects -gt 0) { throw "Namespace $($contract.prefix) já possui objetos sem ledger; aplicação automática bloqueada." }
+    $backupManifest = Invoke-FullBackup
     Invoke-PlatformRegistryMigration
     $registryExists = $true
+} else {
+    Assert-PlatformRegistryIntegrity | Out-Null
 }
 
-Register-App -Contract $contract
+$registration = Get-AppRegistration -Slug $contract.slug
+if ($null -ne $registration -and $registration.table_prefix -ne $contract.prefix) {
+    throw "app_slug $($contract.slug) já está registrado com prefixo diferente: $($registration.table_prefix)"
+}
+
+if ($Action -eq 'plan' -and $null -eq $registration) {
+    Assert-PrefixAvailable -Slug $contract.slug -Prefix $contract.prefix
+    $existingObjects = Get-PrefixObjectCount -Prefix $contract.prefix
+    if ($existingObjects -gt 0) { throw "Namespace $($contract.prefix) possui objetos sem registro do app; adoção automática bloqueada." }
+    Write-Result (New-Result -Status 'planned' -Contract $contract -AppliedCount 0 -PendingCount $contract.migrations.Count -RegistryState 'ready_app_unregistered' -BackupManifest $null -PendingNames @($contract.migrations.name))
+    exit 0
+}
+
+if ($Action -eq 'verify' -and $null -eq $registration) {
+    throw "App $($contract.slug) não está registrado no Ultrabase."
+}
+
+if ($Action -eq 'apply' -and $null -eq $registration) {
+    Assert-PrefixAvailable -Slug $contract.slug -Prefix $contract.prefix
+    $existingObjects = Get-PrefixObjectCount -Prefix $contract.prefix
+    if ($existingObjects -gt 0) { throw "Namespace $($contract.prefix) possui objetos sem ledger; registro automático bloqueado." }
+}
+
 $applied = Get-AppliedMigrations -Slug $contract.slug
 $state = Compare-MigrationState -Contract $contract -Applied $applied
 
 if ($Action -eq 'plan') {
-    Write-Result ([pscustomobject]@{
-        action = $Action
-        app_slug = $contract.slug
-        manifest = $contract.manifest_path
-        total_migrations = $contract.migrations.Count
-        applied_migrations = $state.verified.Count
-        pending_migrations = $state.pending.Count
-        pending = @($state.pending | ForEach-Object { $_.name })
-        platform_registry = 'ready'
-        status = 'planned'
-    })
+    Write-Result (New-Result -Status 'planned' -Contract $contract -AppliedCount $state.verified.Count -PendingCount $state.pending.Count -RegistryState 'ready' -BackupManifest $null -PendingNames @($state.pending.name))
     exit 0
 }
 
 if ($Action -eq 'verify') {
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $CoreScript -Action verify
     if ($LASTEXITCODE -ne 0) { throw 'Validação central do Ultrabase falhou.' }
-    Write-Result ([pscustomobject]@{
-        action = $Action
-        app_slug = $contract.slug
-        manifest = $contract.manifest_path
-        total_migrations = $contract.migrations.Count
-        applied_migrations = $state.verified.Count
-        pending_migrations = $state.pending.Count
-        platform_registry = 'ready'
-        status = if ($state.pending.Count -eq 0) { 'verified' } else { 'pending_migrations' }
-    })
+    $status = if ($state.pending.Count -eq 0) { 'verified' } else { 'pending_migrations' }
+    Write-Result (New-Result -Status $status -Contract $contract -AppliedCount $state.verified.Count -PendingCount $state.pending.Count -RegistryState 'ready' -BackupManifest $null -PendingNames @($state.pending.name))
     if ($state.pending.Count -gt 0) { exit 3 }
-    exit 0
-}
-
-if ($state.pending.Count -eq 0) {
-    Write-Result ([pscustomobject]@{
-        action = $Action
-        app_slug = $contract.slug
-        manifest = $contract.manifest_path
-        total_migrations = $contract.migrations.Count
-        applied_migrations = $state.verified.Count
-        pending_migrations = 0
-        platform_registry = 'ready'
-        backup_manifest = $backupManifest
-        status = 'already_current'
-    })
     exit 0
 }
 
 $destructivePending = @($state.pending | Where-Object { $_.destructive })
 if ($destructivePending.Count -gt 0 -and -not $AllowDestructive) {
-    throw "Há migration destrutiva pendente ($($destructivePending.name -join ', ')). O script exige rollback irmão e -AllowDestructive explícito."
+    throw "Migration destrutiva pendente: $($destructivePending.name -join ', '). Rollback já foi validado, mas -AllowDestructive é obrigatório."
 }
 
-if (-not $SkipBackup -and -not $backupManifest) {
-    $backupManifest = Invoke-FullBackup
+if ($state.pending.Count -eq 0) {
+    Register-App -Contract $contract
+    Write-Result (New-Result -Status 'already_current' -Contract $contract -AppliedCount $state.verified.Count -PendingCount 0 -RegistryState 'ready' -BackupManifest $backupManifest -PendingNames @())
+    exit 0
 }
 
-$commit = Get-GitCommit -Root $RepoRoot
-$runId = New-MigrationRun -Slug $contract.slug -RunAction 'apply' -PendingCount $state.pending.Count -BackupManifest $backupManifest
+if (-not $backupManifest) { $backupManifest = Invoke-FullBackup }
+Register-App -Contract $contract
+
+$ultrabaseCommit = Get-GitCommit -Root $RepoRoot
+$appCommit = Get-GitCommit -Root $contract.root
+$runId = New-MigrationRun -Slug $contract.slug -PendingCount $state.pending.Count -BackupManifest $backupManifest
 $appliedNow = 0
 try {
     foreach ($migration in $state.pending) {
         Write-Host "Aplicando $($migration.name)..." -ForegroundColor Cyan
-        Invoke-DbFile -Path $migration.path | Out-Null
-        Record-Migration -Contract $contract -Migration $migration -Commit $commit
+        Invoke-AppMigrationAtomic -Contract $contract -Migration $migration -UltrabaseCommit $ultrabaseCommit -AppCommit $appCommit
         $appliedNow++
     }
     Complete-MigrationRun -RunId $runId -Status 'succeeded' -AppliedCount $appliedNow -ErrorMessage $null
@@ -590,23 +625,11 @@ try {
 
 $finalApplied = Get-AppliedMigrations -Slug $contract.slug
 $finalState = Compare-MigrationState -Contract $contract -Applied $finalApplied
-if ($finalState.pending.Count -ne 0) {
-    throw "Aplicação terminou com migrations ainda pendentes: $($finalState.pending.name -join ', ')"
-}
+if ($finalState.pending.Count -ne 0) { throw "Aplicação terminou com migrations pendentes: $($finalState.pending.name -join ', ')" }
 
 & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $CoreScript -Action verify
 if ($LASTEXITCODE -ne 0) {
-    throw 'Migrations foram aplicadas, mas a verificação completa do Ultrabase falhou. Use o backup/rollback antes de qualquer cutover.'
+    throw 'Migrations foram aplicadas, mas a verificação completa falhou. Não faça cutover; use o backup e o rollback versionado.'
 }
 
-Write-Result ([pscustomobject]@{
-    action = $Action
-    app_slug = $contract.slug
-    manifest = $contract.manifest_path
-    total_migrations = $contract.migrations.Count
-    applied_migrations = $finalState.verified.Count
-    pending_migrations = 0
-    platform_registry = 'ready'
-    backup_manifest = $backupManifest
-    status = 'applied_and_verified'
-})
+Write-Result (New-Result -Status 'applied_and_verified' -Contract $contract -AppliedCount $finalState.verified.Count -PendingCount 0 -RegistryState 'ready' -BackupManifest $backupManifest -PendingNames @())
