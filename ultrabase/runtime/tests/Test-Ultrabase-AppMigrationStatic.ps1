@@ -44,7 +44,7 @@ function New-Fixture {
     if ($MigrationsPath -eq 'supabase/migrations') {
         Set-Content -LiteralPath (Join-Path $migrationDir $MigrationName) -Value $Sql -Encoding UTF8
         if ($null -ne $RollbackSql) {
-            $rollbackName = [System.IO.Path]::ChangeExtension($MigrationName, $null) + '.rollback.sql'
+            $rollbackName = $MigrationName -replace '\.sql$', '.rollback.sql'
             Set-Content -LiteralPath (Join-Path $migrationDir $rollbackName) -Value $RollbackSql -Encoding UTF8
         }
     }
@@ -58,8 +58,15 @@ function Assert-Validation {
         [bool]$ShouldPass
     )
 
-    $output = & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $Target -Action validate -AppRoot $AppRoot -Json 2>&1
-    $code = $LASTEXITCODE
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $Target -Action validate -AppRoot $AppRoot -Json 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+
     $actualPass = ($code -eq 0)
     if ($actualPass -eq $ShouldPass) {
         $script:Passed++
