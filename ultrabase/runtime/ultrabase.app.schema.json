@@ -57,6 +57,11 @@
       "minLength": 1,
       "description": "Optional public repository URL without embedded credentials."
     },
+    "allow_anonymous": {
+      "type": "boolean",
+      "default": false,
+      "description": "When false or omitted, verification fails if anon has table privileges in this app namespace."
+    },
     "buckets": {
       "type": "array",
       "uniqueItems": true,
