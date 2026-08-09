@@ -25,6 +25,7 @@ Exemplo:
   "migrations_path": "supabase/migrations",
   "database_owner": "Ultrabase Local",
   "source_repository": "https://github.com/example/ach",
+  "allow_anonymous": false,
   "buckets": ["ach-files"],
   "edge_functions": ["ach-sync"],
   "shared_dependencies": ["auth.users"]
@@ -38,6 +39,7 @@ Regras principais:
 - nomes externos usam `<app-slug>-...`;
 - `migrations_path` é relativo à raiz do app e não pode escapar dela;
 - URL de repositório é opcional e não pode carregar credencial embutida;
+- `allow_anonymous` é `false` por padrão; se continuar falso, o gate reprova grants de tabela para `anon` no namespace do app;
 - migrations seguem `<timestamp>_<app_slug>_<mudanca>.sql`;
 - migration aplicada e rollback versionado tornam-se imutáveis por SHA-256.
 
@@ -98,6 +100,17 @@ O validador recusa, entre outros:
 
 Referenciar `auth.users`, `auth.uid()` e criar policy em `storage.objects` continua permitido. Alterar diretamente tabelas internas não é.
 
+## O que `verify` prova no runtime
+
+Além da verificação central já existente do Ultrabase, o gate confirma o contrato do app depois da aplicação:
+
+- todas as tabelas/partitioned tables `public.<app_slug>_*` têm RLS habilitado;
+- quando `allow_anonymous=false`, nenhuma tabela do namespace possui grant para `anon`;
+- todos os buckets declarados no manifesto existem no Storage;
+- todas as Edge Functions declaradas possuem `docker/volumes/functions/<nome>/index.ts` no runtime.
+
+Por isso `applied_and_verified` não significa apenas “o SQL executou”: significa que migration, ledger e invariantes mínimas do domínio foram verificados.
+
 ## Operação destrutiva
 
 O controlador detecta `DROP`, `TRUNCATE`, remoção de coluna/constraint e exclusão direta de dados do domínio.
@@ -143,13 +156,13 @@ Assim, não existe estado normal em que o schema tenha sido aplicado mas o ledge
 
 Se já existirem objetos `public` com o prefixo do app, mas o app não estiver registrado no ledger, o controlador **não adota automaticamente** esse schema. Ele falha de forma explícita.
 
-Isso é intencional: marcar migrations como aplicadas sem provar equivalência seria fabricar histórico. Um domínio legado precisa de migração/adopção planejada e verificável.
+Isso é intencional: marcar migrations como aplicadas sem provar equivalência seria fabricar histórico. Um domínio legado precisa de migração/adoção planejada e verificável.
 
 ## CI do próprio Ultrabase
 
 O workflow `.github/workflows/ultrabase-app-governance.yml` prova duas camadas:
 
-- Windows/PowerShell: parser + casos positivos e negativos do gate estático;
+- Windows/PowerShell: parser + casos positivos e negativos do gate estáático;
 - PostgreSQL 17: replay idempotente da migration core, RLS, grants, constraints e imutabilidade dos ledgers.
 
 Nenhuma mudança deste subsistema deve ser considerada concluída se esse workflow estiver vermelho.
