@@ -20,4 +20,6 @@ Prompt pronto para qualquer aplicativo: [`PROMPT-PARA-CONECTAR-QUALQUER-APP.md`]
 
 Organização de vários apps e estado real do pacote: [`ARQUITETURA-MULTIAPP-E-EMPACOTAMENTO.md`](./ultrabase/runtime/ARQUITETURA-MULTIAPP-E-EMPACOTAMENTO.md). A decisão oficial é um Ultrabase físico com namespace e RLS por app. O runtime já está instalado e automático nesta máquina; o ZIP transportável não inclui banco vivo, segredos ou imagens Docker e não é um executável independente.
 
+Aplicação segura e auditável de migrations de qualquer app: [`APP-MIGRATIONS.md`](./ultrabase/runtime/APP-MIGRATIONS.md). O gate valida namespace, bloqueia alterações em domínios alheios, exige backup, registra checksums imutáveis e mantém migration + ledger na mesma transação.
+
 Estado verificável: [`ULTRABASE-STATUS.json`](./ULTRABASE-STATUS.json).
