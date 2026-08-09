@@ -1,0 +1,107 @@
+name: ULTRABASE App Governance
+
+on:
+  pull_request:
+    paths:
+      - 'ultrabase/runtime/Ultrabase-AppMigration.ps1'
+      - 'ultrabase/runtime/ultrabase.app.schema.json'
+      - 'ultrabase/runtime/tests/**'
+      - 'ultrabase/migrations/**'
+      - '.github/workflows/ultrabase-app-governance.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'ultrabase/runtime/Ultrabase-AppMigration.ps1'
+      - 'ultrabase/runtime/ultrabase.app.schema.json'
+      - 'ultrabase/runtime/tests/**'
+      - 'ultrabase/migrations/**'
+      - '.github/workflows/ultrabase-app-governance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  controller-static:
+    name: PowerShell migration gate
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse controller
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'ultrabase/runtime/Ultrabase-AppMigration.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List -Force
+            throw "PowerShell parser found $($errors.Count) error(s)."
+          }
+
+      - name: Run static isolation contract
+        shell: powershell
+        run: |
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+            -File ultrabase/runtime/tests/Test-Ultrabase-AppMigrationStatic.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  platform-registry:
+    name: PostgreSQL 17 core registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Supabase client roles
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          create role anon nologin;
+          create role authenticated nologin;
+          SQL
+
+      - name: Apply platform migration
+        run: >-
+          psql -v ON_ERROR_STOP=1
+          -f ultrabase/migrations/20260809022000_core_app_registry.sql
+
+      - name: Prove migration replay is idempotent
+        run: >-
+          psql -v ON_ERROR_STOP=1
+          -f ultrabase/migrations/20260809022000_core_app_registry.sql
+
+      - name: Run registry contract tests
+        run: >-
+          psql -v ON_ERROR_STOP=1
+          -f ultrabase/migrations/tests/core_app_registry_test.sql
