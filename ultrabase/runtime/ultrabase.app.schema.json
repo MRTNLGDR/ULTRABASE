@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ultrabase.local/schemas/ultrabase.app.schema.json",
+  "title": "Ultrabase application manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "app_slug",
+    "display_name",
+    "table_prefix",
+    "migrations_path",
+    "database_owner",
+    "buckets",
+    "edge_functions",
+    "shared_dependencies"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "app_slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,23}$",
+      "not": {
+        "enum": [
+          "auth",
+          "storage",
+          "realtime",
+          "extensions",
+          "supabase_functions",
+          "vault",
+          "graphql",
+          "core"
+        ]
+      }
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "table_prefix": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,23}_$"
+    },
+    "migrations_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path relative to the app repository root, normally supabase/migrations."
+    },
+    "database_owner": {
+      "const": "Ultrabase Local"
+    },
+    "source_repository": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional public repository URL without embedded credentials."
+    },
+    "buckets": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 63
+      }
+    },
+    "edge_functions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 63
+      }
+    },
+    "shared_dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      }
+    }
+  }
+}
