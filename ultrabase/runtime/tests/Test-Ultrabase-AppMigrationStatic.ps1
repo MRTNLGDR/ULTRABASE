@@ -1,10 +1,10 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$Target = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\Ultrabase-AppMigration.ps1'))
+$Target = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\\Ultrabase-AppMigration.ps1'))
 $Root = Join-Path ([System.IO.Path]::GetTempPath()) ("ultrabase-appmigration-tests-" + [guid]::NewGuid().ToString('N'))
 $Passed = 0
 $Failed = 0
@@ -24,7 +24,7 @@ function New-Fixture {
     )
 
     $appRoot = Join-Path $Root $Name
-    $migrationDir = Join-Path $appRoot 'supabase\migrations'
+    $migrationDir = Join-Path $appRoot 'supabase\\migrations'
     New-Item -ItemType Directory -Force -Path $migrationDir | Out-Null
 
     $manifest = [ordered]@{
@@ -44,7 +44,7 @@ function New-Fixture {
     if ($MigrationsPath -eq 'supabase/migrations') {
         Set-Content -LiteralPath (Join-Path $migrationDir $MigrationName) -Value $Sql -Encoding UTF8
         if (-not [string]::IsNullOrEmpty($RollbackSql)) {
-            $rollbackName = $MigrationName -replace '\.sql$', '.rollback.sql'
+            $rollbackName = $MigrationName -replace '\\.sql$', '.rollback.sql'
             Set-Content -LiteralPath (Join-Path $migrationDir $rollbackName) -Value $RollbackSql -Encoding UTF8
         }
     }
@@ -124,7 +124,7 @@ for select to authenticated using (bucket_id = 'demo-files');
 
     Assert-Validation 'migration filename rejected' (New-Fixture -Name 'bad-name' -MigrationName '20260809030000_other_create_items.sql') $false
 
-    Assert-Validation 'path traversal rejected' (New-Fixture -Name 'path-traversal' -MigrationsPath '..\outside') $false
+    Assert-Validation 'path traversal rejected' (New-Fixture -Name 'path-traversal' -MigrationsPath '..\\outside') $false
 
     $dropSql = 'drop table public.demo_old_items;'
     $rollbackSql = 'create table public.demo_old_items (id uuid primary key);'
