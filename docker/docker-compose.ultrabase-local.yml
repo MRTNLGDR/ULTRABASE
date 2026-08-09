@@ -31,3 +31,4 @@ services:
   db:
     volumes:
       - ./backups:/backups
+      - ./volumes/db/ultrabase.sql:/docker-entrypoint-initdb.d/migrations/96-ultrabase.sql:ro,z
