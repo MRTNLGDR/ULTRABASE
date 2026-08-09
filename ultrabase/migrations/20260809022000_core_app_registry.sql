@@ -4,6 +4,18 @@
 
 begin;
 
+create table if not exists public.core_platform_migrations (
+  migration_name text primary key,
+  migration_sha256 text not null,
+  applied_at timestamptz not null default now(),
+  applied_by text not null default current_user,
+  metadata jsonb not null default '{}'::jsonb,
+  constraint core_platform_migrations_name_format
+    check (migration_name ~ '^[0-9]{14}_core_.+\.sql$'),
+  constraint core_platform_migrations_sha_format
+    check (migration_sha256 ~ '^[0-9a-f]{64}$')
+);
+
 create table if not exists public.core_applications (
   app_slug text primary key,
   display_name text not null,
@@ -79,15 +91,19 @@ before update on public.core_applications
 for each row execute function public.core_touch_updated_at();
 
 -- Platform registry is administrative state. It is not part of the client Data API.
+alter table public.core_platform_migrations enable row level security;
 alter table public.core_applications enable row level security;
 alter table public.core_app_migrations enable row level security;
 alter table public.core_app_migration_runs enable row level security;
 
+revoke all on table public.core_platform_migrations from anon, authenticated;
 revoke all on table public.core_applications from anon, authenticated;
 revoke all on table public.core_app_migrations from anon, authenticated;
 revoke all on table public.core_app_migration_runs from anon, authenticated;
 revoke all on function public.core_touch_updated_at() from public, anon, authenticated;
 
+comment on table public.core_platform_migrations is
+  'Immutable checksum ledger for Ultrabase-owned platform migrations.';
 comment on table public.core_applications is
   'Ultrabase-governed registry of logical applications sharing this physical installation.';
 comment on table public.core_app_migrations is
