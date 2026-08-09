@@ -1,23 +1,21 @@
 @echo off
 REM ===========================================================================
-REM  Ultrabase  -  UM CLIQUE FAZ TUDO
+REM  ULTRABASE - PONTO DE ENTRADA UNICO
 REM
-REM  Este e o UNICO arquivo que voce precisa executar. Ele, nesta ordem:
-REM     1. puxa do GitHub o que foi corrigido/melhorado (git pull)
-REM     2. instala / atualiza todas as dependencias
-REM     3. sobe o servidor na porta 8000
-REM     4. abre o navegador
+REM  Um clique neste arquivo:
+REM     1. atualiza o Git sem apagar alteracoes locais
+REM     2. valida ou gera segredos criptograficos fora do Git
+REM     3. valida Docker Compose e dependencias
+REM     4. sobe, verifica e monitora o Ultrabase
+REM     5. abre o Studio em http://127.0.0.1:8000
 REM
-REM  Opcoes (arraste nao precisa, e so digitar no cmd):
-REM     RUN.bat /sem-navegador   sobe sem abrir o navegador
-REM     RUN.bat /sem-pull        nao atualiza pelo git, so instala e sobe
-REM     RUN.bat /reinstalar      refaz node_modules / .venv do zero
-REM     RUN.bat /parar           derruba o servidor deste projeto
-REM
-REM  Nunca apaga trabalho local: antes do pull ele guarda no git stash
-REM  e devolve depois. Nao usa reset --hard.
+REM  Opcoes:
+REM     RUN.bat /sem-navegador
+REM     RUN.bat /sem-pull
+REM     RUN.bat /reinstalar
+REM     RUN.bat /parar
 REM ===========================================================================
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
 title Ultrabase
 
@@ -28,22 +26,38 @@ if /i "%~1"=="/sem-navegador" set "ARGS=%ARGS% -SemNavegador" & shift & goto par
 if /i "%~1"=="/sem-pull"      set "ARGS=%ARGS% -SemPull"      & shift & goto parse
 if /i "%~1"=="/reinstalar"    set "ARGS=%ARGS% -Reinstalar"   & shift & goto parse
 if /i "%~1"=="/parar"         set "ARGS=%ARGS% -Parar"        & shift & goto parse
-echo [aviso] opcao desconhecida: %~1
+echo [AVISO] Opcao desconhecida: %~1
 shift
 goto parse
-:pronto
 
-if not exist "D:\AGENT_SYNC\motor-run.ps1" (
-  echo [ERRO] motor nao encontrado em D:\AGENT_SYNC\motor-run.ps1
-  pause
-  exit /b 9
+:pronto
+set "BOOTSTRAP=%~dp0ultrabase\runtime\Ultrabase-Bootstrap.ps1"
+set "SHARED_MOTOR=D:\AGENT_SYNC\motor-run.ps1"
+
+if exist "%BOOTSTRAP%" (
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%BOOTSTRAP%" %ARGS%
+  set "RC=%ERRORLEVEL%"
+  goto fim
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "D:\AGENT_SYNC\motor-run.ps1" -Projeto ULTRABASE %ARGS%
-set "RC=%ERRORLEVEL%"
+REM Compatibilidade de emergencia para copias antigas/incompletas. O produto
+REM normal nao depende deste arquivo externo.
+if exist "%SHARED_MOTOR%" (
+  echo [AVISO] Bootstrap interno ausente. Usando motor compartilhado de emergencia.
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SHARED_MOTOR%" -Projeto ULTRABASE %ARGS%
+  set "RC=%ERRORLEVEL%"
+  goto fim
+)
+
+echo [ERRO] Bootstrap interno nao encontrado em:
+echo        %BOOTSTRAP%
+echo [ERRO] Repare ou baixe novamente o repositorio ULTRABASE.
+set "RC=9"
+
+:fim
 if not "%RC%"=="0" (
   echo.
-  echo Terminou com erro %RC%. A janela fica aberta para voce ler a causa acima.
+  echo Ultrabase terminou com erro %RC%. Leia a causa acima.
   pause
 )
 endlocal & exit /b %RC%
