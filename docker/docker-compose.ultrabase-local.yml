@@ -17,6 +17,13 @@ services:
       - "127.0.0.1:${KONG_HTTPS_PORT}:8443/tcp"
 
   supavisor:
+    # The official image starts by setting RLIMIT_NOFILE=100000. Defining the
+    # matching container hard limit prevents an immediate restart loop on
+    # Docker hosts whose inherited hard limit is lower (including CI runners).
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
     ports: !override
       - "127.0.0.1:${POSTGRES_PORT}:5432/tcp"
       - "127.0.0.1:${POOLER_PROXY_PORT_TRANSACTION}:6543/tcp"
