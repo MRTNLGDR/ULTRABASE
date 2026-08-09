@@ -221,7 +221,7 @@ function Get-MigrationDescriptor([System.IO.FileInfo]$File, [string]$Slug, [stri
     Assert-SqlSafe -Sql $sql -FileName $File.Name -Prefix $Prefix
 
     $destructive = ($sql -match '(?is)\b(?:drop\s+(?:table|view|function|procedure|type)|truncate\s+(?:table\s+)?|alter\s+table\b[^;]*\bdrop\s+(?:column|constraint)|delete\s+from\s+public\.)')
-    $rollbackPath = [System.IO.Path]::ChangeExtension($File.FullName, $null) + '.rollback.sql'
+    $rollbackPath = $File.FullName -replace '\.sql$', '.rollback.sql'
     $rollback = if (Test-Path -LiteralPath $rollbackPath -PathType Leaf) { $rollbackPath } else { $null }
 
     if ($destructive -and -not $rollback) {
@@ -398,7 +398,7 @@ where public.core_applications.table_prefix=excluded.table_prefix;
 
     $registered = Get-AppRegistration -Slug $Contract.slug
     if ($null -eq $registered -or $registered.table_prefix -ne $Contract.prefix) {
-        throw "Falha ao reservar namespace do app $($Contract.slug)."
+        throw "Falha ao reservar namespace do app $($contract.slug)."
     }
 }
 
