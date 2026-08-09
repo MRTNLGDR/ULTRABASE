@@ -93,6 +93,28 @@
     "separate_instance_when": "independent_trust_or_client_boundary",
     "document": "ultrabase/runtime/ARQUITETURA-MULTIAPP-E-EMPACOTAMENTO.md"
   },
+  "migration_governance": {
+    "repository_implementation": "merged",
+    "feature_commit": "5cb48f6a08a851ee93af12906b4dba18d6322a36",
+    "controller": "ultrabase/runtime/Ultrabase-AppMigration.ps1",
+    "launcher": "ultrabase/12-GERENCIAR-MIGRATIONS-APP.cmd",
+    "manifest_schema": "ultrabase/runtime/ultrabase.app.schema.json",
+    "platform_registry_migration": "ultrabase/migrations/20260809022000_core_app_registry.sql",
+    "platform_registry_runtime_state": "installed_on_first_governed_apply_if_not_present",
+    "runtime_state_claimed_by_git_only": false,
+    "mandatory_backup_before_pending_migration": true,
+    "migration_and_ledger_same_transaction": true,
+    "applied_migration_sha256_immutable": true,
+    "rollback_sha256_immutable": true,
+    "destructive_change_requires_rollback_and_explicit_flag": true,
+    "legacy_namespace_auto_adoption": false,
+    "verify_requires_app_table_rls": true,
+    "verify_checks_declared_buckets_and_edge_functions": true,
+    "ci_windows_static_contract": "19/19_passed",
+    "ci_postgresql17_registry_contract": "passed",
+    "ci_validate_pull_request": "passed",
+    "ci_braintrust": "passed"
+  },
   "packaging": {
     "current_machine_runtime_installed": true,
     "autostart_and_monitor": true,
