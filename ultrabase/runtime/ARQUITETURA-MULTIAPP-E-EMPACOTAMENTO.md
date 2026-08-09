@@ -87,7 +87,9 @@ A migration de plataforma não é declarada como já aplicada em qualquer máqui
 
 ## Gate governado de migrations
 
-O controlador oficial é `ultrabase/runtime/Ultrabase-AppMigration.ps1`, com as ações `validate`, `plan`, `apply` e `verify`. O launcher humano é `ultrabase/12-GERENCIAR-MIGRATIONS-APP.cmd`.
+O controlador administrativo é `ultrabase/runtime/Ultrabase-AppMigration.ps1`, com as ações `validate`, `plan`, `apply` e `verify`. Ele é um componente interno para agentes, automação e manutenção do banco; **não é um segundo inicializador do usuário**.
+
+O ponto de entrada humano do projeto continua sendo exclusivamente `RUN.bat`, conforme `AGENTS.md`. Não se deve criar outro `.bat`/`.cmd` apenas para migrations. Quando o motor compartilhado precisar automatizar esse gate, ele deve invocar o controlador interno sem alterar a regra do inicializador único.
 
 O fluxo mantém **uma única stack** e usa o `supabase-db` já existente. Ele não cria uma segunda instância Supabase CLI. O contrato completo está em `ultrabase/runtime/APP-MIGRATIONS.md`.
 
@@ -148,4 +150,4 @@ O ZIP não é um banco em execução. Apps não escrevem “dentro do pacote”;
 
 ## Regra curta para qualquer integrador
 
-> Use a única instalação do Ultrabase, reserve um `app_slug`, prefixe todos os recursos, versione `ultrabase.app.json` e migrations no app, aplique RLS, não escreva no domínio de outro app e nunca trate o ZIP como banco ou instalador completo.
+> Use a única instalação do Ultrabase, reserve um `app_slug`, prefixe todos os recursos, versione `ultrabase.app.json` e migrations no app, aplique RLS, não escreva no domínio de outro app e nunca trate o ZIP como banco ou instalador completo. Para o usuário, o único ponto de entrada é `RUN.bat`.
