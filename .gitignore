@@ -41,16 +41,16 @@ coverage
 # nyc test coverage
 .nyc_output
 
-# Grunt intermediate storage (https://gruntjs.com/creating-plugins#storing-task-files)
+# Grunt intermediate storage
 .grunt
 
-# Bower dependency directory (https://bower.io/)
+# Bower dependency directory
 bower_components
 
 # node-waf configuration
 .lock-wscript
 
-# Compiled binary addons (https://nodejs.org/api/addons.html)
+# Compiled binary addons
 build/Release
 
 # Dependency directories
@@ -75,15 +75,15 @@ next-env.d.ts
 # Optional REPL history
 .node_repl_history
 
-# Output of 'npm pack'
+# Output of npm pack
 *.tgz
 
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
+# dotenv environment variables
 .env
-# excempt the apps/www .env
+# apps/www intentionally retains its non-secret public build environment
 !apps/www/.env
 .env.tmp
 .env.test
@@ -91,7 +91,18 @@ next-env.d.ts
 .env.staging
 .env.production
 
-# parcel-bundler cache (https://parceljs.org/)
+# Ultrabase private configuration and live state. Never unignore these paths.
+docker/.env
+docker/supabase/.env
+docker/supabase-traefik/.env
+docker/backups/**
+docker/volumes/db/data/**
+docker/volumes/storage/**
+*.dump
+*.backup
+*.sql.gz
+
+# parcel-bundler cache
 .cache
 
 # next.js build output
@@ -126,11 +137,6 @@ next-env.d.ts
 !.claude/CLAUDE.md
 CLAUDE.local.md
 
-#include template .env file for docker-compose
-!docker/.env
-!docker/supabase/.env
-!docker/supabase-traefik/.env
-
 # Supabase
 **/supabase/.branches
 **/supabase/.temp
@@ -140,7 +146,7 @@ apps/new-docs/*
 # UI tokens
 packages/ui/tokens/**/*.json
 
-# For self-hosted logs: https://github.com/supabase/supabase/blob/86e3ab20abfdb9c3e666334d3d2f8efeef9ccf2c/docker/docker-compose-logging.yml#L101
+# Self-hosted external service credentials
 gcloud.json
 
 # sitemaps

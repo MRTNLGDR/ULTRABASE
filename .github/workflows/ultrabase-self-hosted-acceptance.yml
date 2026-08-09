@@ -1,0 +1,228 @@
+name: ULTRABASE Self-Hosted Acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'RUN.bat'
+      - 'AGENTS.md'
+      - '.gitignore'
+      - 'docker/**'
+      - 'apps/studio/styles/ultrabase.css'
+      - 'apps/studio/public/img/supabase-logo.svg'
+      - 'ultrabase/runtime/**'
+      - 'ultrabase/scripts/**'
+      - '.github/workflows/ultrabase-self-hosted-acceptance.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'RUN.bat'
+      - 'AGENTS.md'
+      - '.gitignore'
+      - 'docker/**'
+      - 'apps/studio/styles/ultrabase.css'
+      - 'apps/studio/public/img/supabase-logo.svg'
+      - 'ultrabase/runtime/**'
+      - 'ultrabase/scripts/**'
+      - '.github/workflows/ultrabase-self-hosted-acceptance.yml'
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ultrabase-self-hosted-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-contract:
+    name: Secrets, generator and Compose contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove private state cannot be committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git check-ignore --no-index -q docker/.env
+          forbidden="$(git ls-files | awk '
+            $0 == "docker/.env" { print; next }
+            $0 ~ /^docker\/backups\// && $0 !~ /\/[.]gitkeep$/ { print; next }
+            $0 ~ /^docker\/volumes\/db\/data\// && $0 !~ /\/[.]gitkeep$/ { print; next }
+            $0 ~ /^docker\/volumes\/storage\// && $0 !~ /\/([.]gitkeep|[.]emptyFolderPlaceholder)$/ { print; next }
+          ')"
+          if [[ -n "$forbidden" ]]; then
+            echo "Private Ultrabase state is tracked:" >&2
+            echo "$forbidden" >&2
+            exit 1
+          fi
+          grep -q 'ultrabase\\runtime\\Ultrabase-Bootstrap.ps1' RUN.bat
+          if grep -q 'motor nao encontrado em D:\\AGENT_SYNC' RUN.bat; then
+            echo 'RUN.bat still hard-depends on the private shared motor.' >&2
+            exit 1
+          fi
+
+      - name: Parse all new Node runtime files
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check ultrabase/runtime/generate-ultrabase-env.mjs
+          node --check ultrabase/runtime/lib/env-core.mjs
+          node --check ultrabase/runtime/verify-ultrabase-real.mjs
+          node --check ultrabase/runtime/acceptance/common.mjs
+          node --check ultrabase/runtime/acceptance/service-tests.mjs
+          node --check ultrabase/runtime/acceptance/redact-log.mjs
+
+      - name: Generate, cryptographically verify and tamper-test secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          output="$(node ultrabase/runtime/generate-ultrabase-env.mjs --template docker/.env.example --env "$tmp/.env" --force --json)"
+          node -e 'const value=JSON.parse(process.argv[1]); if(value.secrets_printed!==false || !String(value.status).includes("generated")) process.exit(1)' "$output"
+          if grep -Eq '(JWT_SECRET=|POSTGRES_PASSWORD=|sb_secret_)' <<<"$output"; then
+            echo 'Secret generator printed a credential.' >&2
+            exit 1
+          fi
+          node ultrabase/runtime/generate-ultrabase-env.mjs --env "$tmp/.env" --check --json >/dev/null
+          [[ "$(stat -c '%a' "$tmp/.env")" == '600' ]]
+
+          cp "$tmp/.env" "$tmp/tampered.env"
+          node - "$tmp/tampered.env" <<'NODE'
+          const fs = require('node:fs')
+          const file = process.argv[2]
+          let text = fs.readFileSync(file, 'utf8')
+          text = text.replace(/^ANON_KEY=(.+)$/m, (_, token) => {
+            const parts = token.split('.')
+            parts[2] = `${parts[2][0] === 'A' ? 'B' : 'A'}${parts[2].slice(1)}`
+            return `ANON_KEY=${parts.join('.')}`
+          })
+          fs.writeFileSync(file, text)
+          NODE
+          if node ultrabase/runtime/generate-ultrabase-env.mjs --env "$tmp/tampered.env" --check >/dev/null 2>&1; then
+            echo 'Tampered JWT was incorrectly accepted.' >&2
+            exit 1
+          fi
+
+      - name: Validate the real Docker Compose graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ultrabase/runtime/generate-ultrabase-env.mjs --template docker/.env.example --env docker/.env --force --json >/dev/null
+          (cd docker && docker compose config --quiet)
+          rm -f docker/.env
+
+  powershell-parser:
+    name: Windows PowerShell parser
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse Windows controllers and prove bootstrap encoding
+        shell: powershell
+        run: |
+          $files = @(
+            'ultrabase/runtime/Ultrabase-Bootstrap.ps1',
+            'ultrabase/runtime/Ultrabase-Runtime.ps1',
+            'ultrabase/runtime/Ultrabase-AppMigration.ps1',
+            'ultrabase/scripts/ultrabase.ps1'
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file), [ref]$tokens, [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | Format-List -Force
+              throw "PowerShell parser found $($errors.Count) error(s) in $file"
+            }
+          }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path 'ultrabase/runtime/Ultrabase-Bootstrap.ps1'))
+          if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
+            throw 'Ultrabase-Bootstrap.ps1 must be UTF-8 with BOM for Windows PowerShell 5.1.'
+          }
+
+  real-stack:
+    name: Real 13-service stack and restore
+    needs: [static-contract, powershell-parser]
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Free runner disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          docker system prune --all --force || true
+          df -h
+
+      - name: Generate ephemeral secure runtime configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ultrabase/runtime/generate-ultrabase-env.mjs --template docker/.env.example --env docker/.env --force --json
+          node ultrabase/runtime/generate-ultrabase-env.mjs --env docker/.env --check --json
+          [[ "$(stat -c '%a' docker/.env)" == '600' ]]
+          (cd docker && docker compose config --quiet)
+
+      - name: Start the actual Ultrabase stack
+        working-directory: docker
+        shell: bash
+        run: docker compose up -d --build --wait --wait-timeout 900
+
+      - name: Run real product acceptance
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          node ultrabase/runtime/verify-ultrabase-real.mjs \
+            --env docker/.env \
+            --docker-dir docker \
+            --report artifacts/ultrabase-acceptance.json
+
+      - name: Capture redacted diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          (cd docker && docker compose ps --all) > artifacts/compose-ps.txt 2>&1 || true
+          (cd docker && docker compose logs --no-color --tail 500) > /tmp/ultrabase-compose.log 2>&1 || true
+          node ultrabase/runtime/acceptance/redact-log.mjs \
+            docker/.env /tmp/ultrabase-compose.log artifacts/compose-log-redacted.txt || true
+          rm -f /tmp/ultrabase-compose.log
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ultrabase-real-acceptance-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove the disposable CI stack
+        if: always()
+        working-directory: docker
+        shell: bash
+        run: docker compose down -v --remove-orphans || true

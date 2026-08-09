@@ -1,8 +1,8 @@
 {
-  "name": "supabase",
-  "description": "The Postgres Development Platform.",
+  "name": "ultrabase",
+  "description": "Independent self-hosted Postgres platform compatible with the Supabase open-source ecosystem.",
   "version": "0.0.0",
-  "author": "Supabase, Inc.",
+  "author": "MRTNLGDR and Supabase contributors",
   "license": "Apache-2.0",
   "private": true,
   "scripts": {
@@ -68,12 +68,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/supabase/supabase.git"
+    "url": "git+https://github.com/MRTNLGDR/ULTRABASE.git"
   },
   "engines": {
     "pnpm": "11.13",
     "node": ">=22.13"
   },
-  "keywords": ["postgres", "firebase", "storage", "functions", "database", "auth"],
+  "keywords": ["ultrabase", "postgres", "supabase", "self-hosted", "storage", "functions", "database", "auth"],
   "packageManager": "pnpm@11.13.1"
 }

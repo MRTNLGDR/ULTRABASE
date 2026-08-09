@@ -1,0 +1,27 @@
+ULTRABASE
+Copyright 2026 MRTNLGDR
+
+This product includes and modifies software developed by Supabase, Inc. and
+contributors to the Supabase open-source project:
+
+    https://github.com/supabase/supabase
+
+The upstream work and this distribution are made available under the Apache
+License, Version 2.0, included in the LICENSE file.
+
+Material Ultrabase modifications include, among other changes:
+
+- Ultrabase Studio identity and local runtime presentation;
+- a self-contained Windows entrypoint and bootstrap;
+- secure local secret, opaque API key and ES256/JWKS generation;
+- loopback-only local exposure and runtime monitoring;
+- governed multi-application migrations and immutable ledgers;
+- backup, restore and end-to-end self-hosted acceptance gates;
+- Ultrabase-specific documentation and operating policy.
+
+Supabase is a trademark of its respective owners. ULTRABASE is an independent
+open-source distribution and is not affiliated with, sponsored by, endorsed by,
+or supported by Supabase, Inc.
+
+Notices and license headers embedded in upstream and third-party source files
+remain applicable to those components.
