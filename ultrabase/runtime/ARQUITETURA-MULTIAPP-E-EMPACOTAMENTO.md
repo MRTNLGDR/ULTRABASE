@@ -23,7 +23,7 @@ Antes de criar qualquer objeto, o app escolhe um `app_slug` exclusivo e imutáve
 
 Exemplos válidos: `ach`, `oraculo`, `arcz`, `avangard_one`.
 
-Antes de reservar o slug, o integrador deve inspecionar tabelas, views, funções SQL, buckets, Edge Functions e migrations existentes. A reserva é registrada no repositório do aplicativo em `ultrabase.app.json`:
+Antes de reservar o slug, o integrador deve inspecionar tabelas, views, funções SQL, buckets, Edge Functions e migrations existentes. A reserva é declarada no repositório do aplicativo em `ultrabase.app.json`:
 
 ```json
 {
@@ -32,14 +32,16 @@ Antes de reservar o slug, o integrador deve inspecionar tabelas, views, funçõe
   "display_name": "Artistic Career Hub",
   "table_prefix": "ach_",
   "migrations_path": "supabase/migrations",
+  "database_owner": "Ultrabase Local",
+  "source_repository": "https://github.com/example/ach",
+  "allow_anonymous": false,
   "buckets": ["ach-files"],
   "edge_functions": [],
-  "shared_dependencies": ["auth.users"],
-  "database_owner": "Ultrabase Local"
+  "shared_dependencies": ["auth.users"]
 }
 ```
 
-Esse manifesto pertence ao app, não contém chave nem senha e deve ser versionado no Git junto das migrations.
+Esse manifesto pertence ao app, não contém chave nem senha e deve ser versionado no Git junto das migrations. `allow_anonymous` é `false` por padrão; quando permanece falso, o gate de verificação reprova grants de tabela para `anon` dentro do namespace do aplicativo.
 
 ## Convenção que impede colisões
 
@@ -72,7 +74,37 @@ Cada app pode criar e alterar somente objetos com seu prefixo, além de policies
 9. qualquer mudança destrutiva exige backup, rollback e conferência de consumidores;
 10. segredos nunca entram no manifesto do app, migration, cliente ou Git.
 
-Um catálogo central de apps pode usar futuramente `core_applications` e `core_app_memberships`, mas essas tabelas **não são declaradas como existentes** até que migrations próprias sejam criadas e aprovadas.
+O catálogo central **agora existe como implementação versionada do Ultrabase**, sob o prefixo reservado `core_`, por meio da migration `ultrabase/migrations/20260809022000_core_app_registry.sql`. Ele contém:
+
+- `core_platform_migrations`: ledger append-only das migrations de plataforma do próprio Ultrabase;
+- `core_applications`: reserva de slug/prefixo e metadados declarativos do aplicativo;
+- `core_app_migrations`: ledger append-only de migration e rollback, ambos identificados por SHA-256;
+- `core_app_migration_runs`: trilha operacional de execuções de migration.
+
+Essas tabelas são administrativas, têm RLS habilitado e não concedem acesso direto a `anon` ou `authenticated`. Elas não transferem a propriedade do schema do app para o Ultrabase: o app continua dono de seu manifesto e de suas migrations; o `core_` apenas governa reserva, integridade e execução.
+
+A migration de plataforma não é declarada como já aplicada em qualquer máquina apenas por existir no Git. O controlador a instala de forma segura na primeira execução governada que precisar dela, depois de backup e validação. Estado de repositório e estado físico do runtime são deliberadamente separados.
+
+## Gate governado de migrations
+
+O controlador oficial é `ultrabase/runtime/Ultrabase-AppMigration.ps1`, com as ações `validate`, `plan`, `apply` e `verify`. O launcher humano é `ultrabase/12-GERENCIAR-MIGRATIONS-APP.cmd`.
+
+O fluxo mantém **uma única stack** e usa o `supabase-db` já existente. Ele não cria uma segunda instância Supabase CLI. O contrato completo está em `ultrabase/runtime/APP-MIGRATIONS.md`.
+
+Antes de aplicar uma mudança, o gate:
+
+1. valida `ultrabase.app.json`, slug, prefixo e caminhos;
+2. valida nomes de migrations e namespaces externos;
+3. bloqueia DDL/DML direto em schemas internos do Supabase;
+4. bloqueia criação/alteração explícita de objetos `public.*` fora do prefixo do app;
+5. detecta reescrita de migration/rollback já aplicados por SHA-256;
+6. exige rollback irmão e `-AllowDestructive` para operações destrutivas;
+7. cria backup pelo mecanismo oficial do Ultrabase e exige um novo manifesto de backup;
+8. aplica cada migration e sua entrada de ledger na mesma transação PostgreSQL;
+9. roda a verificação central do Ultrabase;
+10. confirma RLS das tabelas do namespace, regra de acesso anônimo e recursos declarados do app.
+
+`plan` não registra um app inexistente nem adota schema legado automaticamente. Se objetos com o prefixo já existem sem ledger, o gate falha e exige uma adoção/migração explicitamente planejada em vez de fabricar histórico.
 
 ## Auth compartilhado sem misturar autorização
 
